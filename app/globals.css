@@ -1,0 +1,13 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --kemenkum-blue: #2D338F;
+  --kemenkum-yellow: #FBCD0B;
+  --kemenkum-white: #FFFFFF;
+}
+
+body {
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}

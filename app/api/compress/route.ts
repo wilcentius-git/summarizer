@@ -62,7 +62,10 @@ async function compressWithGhostscript(buffer: Buffer): Promise<Buffer> {
     const args = [
       "-sDEVICE=pdfwrite",
       "-dCompatibilityLevel=1.4",
-      "-dPDFSETTINGS=/ebook", // 150 dpi, good balance of quality/size
+      "-dPDFSETTINGS=/screen", // 72 dpi – avoids upsampling low-res images (which caused larger output)
+      "-dColorImageResolution=72",
+      "-dGrayImageResolution=72",
+      "-dMonoImageResolution=72",
       "-dNOPAUSE",
       "-dQUIET",
       "-dBATCH",

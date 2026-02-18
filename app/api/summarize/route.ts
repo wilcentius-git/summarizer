@@ -9,28 +9,23 @@ import {
 import { pdfPagesToImages, type PdfPageImage } from "@/lib/pdf-to-images";
 
 const MAX_FILE_SIZE_BYTES = 500 * 1024 * 1024; // 500 MB
-const MAX_TEXT_LENGTH = 12000; // truncate for context limit
+const MAX_TEXT_LENGTH = 30000; // truncate for context limit (multi-page OCR)
 const MIN_TEXT_FOR_SKIP_OCR = 50; // if less, try OCR fallback
-const GROQ_IMAGES_PER_REQUEST = 5; // Groq vision limit
+const GROQ_IMAGES_PER_REQUEST = 1; // 1 per request to avoid last-image bias, ensure all pages extracted
 
 const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
 const GROQ_MODEL = "llama-3.1-8b-instant";
 const GROQ_VISION_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct";
 
-async function extractTextFromImages(
+async function callVisionApi(
   images: PdfPageImage[],
+  prompt: string,
   apiKey: string
 ): Promise<string> {
   const content: Array<
     | { type: "text"; text: string }
     | { type: "image_url"; image_url: { url: string } }
-  > = [
-    {
-      type: "text",
-      text:
-        "Extract all text from these PDF page images (OCR). Also describe any charts, diagrams, or figures. Preserve structure and order. Return as plain text.",
-    },
-  ];
+  > = [{ type: "text", text: prompt }];
   for (const img of images) {
     content.push({ type: "image_url", image_url: { url: img.base64 } });
   }
@@ -44,7 +39,7 @@ async function extractTextFromImages(
     body: JSON.stringify({
       model: GROQ_VISION_MODEL,
       messages: [{ role: "user", content }],
-      max_tokens: 4096,
+      max_tokens: 8192,
       temperature: 0.2,
     }),
   });
@@ -58,6 +53,33 @@ async function extractTextFromImages(
     choices?: Array<{ message?: { content?: string } }>;
   };
   return json.choices?.[0]?.message?.content?.trim() ?? "";
+}
+
+async function extractTextFromImages(
+  images: PdfPageImage[],
+  apiKey: string,
+  totalPages: number
+): Promise<string> {
+  const pageLabel =
+    images.length === 1
+      ? ` Ini Halaman ${images[0].pageNum} dari ${totalPages}.`
+      : "";
+  const mainPrompt =
+    `Ekstrak SEMUA teks dari gambar halaman PDF ini.${pageLabel}
+WAJIB berikan output untuk halaman ini - jangan kembalikan kosong.
+Prioritaskan konten utama (badan dokumen). Abaikan header/footer/kop surat yang berulang.
+Jika ada bagan, diagram, tabel, atau flowchart: ekstrak semua teks dan label, jelaskan strukturnya.
+Pertahankan urutan. Kembalikan sebagai teks biasa dalam Bahasa Indonesia.`;
+
+  let extracted = await callVisionApi(images, mainPrompt, apiKey);
+
+  // Retry with simpler prompt if model returned empty (common for complex layouts)
+  if (!extracted.trim() && images.length === 1) {
+    const fallbackPrompt = `Deskripsikan SEMUA yang terlihat di halaman PDF ini (Halaman ${images[0].pageNum} dari ${totalPages}). Sertakan teks, label, elemen bagan/diagram/tabel. Tulis dalam Bahasa Indonesia. WAJIB berikan deskripsi - jangan kosong.`;
+    extracted = await callVisionApi(images, fallbackPrompt, apiKey);
+  }
+
+  return extracted;
 }
 
 export async function POST(request: NextRequest) {
@@ -105,10 +127,17 @@ export async function POST(request: NextRequest) {
       resolvedMime === "application/pdf"
         ? async (images: PdfPageImage[]) => {
             const chunks: string[] = [];
+            const totalPages = images.length;
             for (let i = 0; i < images.length; i += GROQ_IMAGES_PER_REQUEST) {
               const batch = images.slice(i, i + GROQ_IMAGES_PER_REQUEST);
-              const extracted = await extractTextFromImages(batch, apiKey);
-              if (extracted) chunks.push(extracted);
+              const extracted = await extractTextFromImages(batch, apiKey, totalPages);
+              const pageNum = batch[0].pageNum;
+              // Always include page marker so summarizer sees full document structure
+              chunks.push(
+                extracted.trim()
+                  ? `[Halaman ${pageNum}]\n${extracted}`
+                  : `[Halaman ${pageNum}]\n(Konten halaman ini tidak dapat diekstrak.)`
+              );
             }
             return chunks.join("\n\n");
           }
@@ -140,7 +169,8 @@ export async function POST(request: NextRequest) {
 - Istilah teknis (misalnya: API, PDF, database, framework, dll.) tetap gunakan istilah aslinya, jangan diterjemahkan.
 - Awali rangkuman dengan kalimat deskripsi dokumen, contoh: "Dokumen ini berisi hal tentang [topik utama dokumen]."
 - Setelah itu, lanjutkan dengan poin-poin penting secara ringkas.
-- Jangan hanya menyatakan kesimpulan abstrak (misalnya "mereka memiliki sikap yang berbeda"). Sebaliknya, berikan contoh konkret dari dokumen yang mendukung kesimpulan itu. Contoh: jangan tulis "Raka dan Lina berbeda dalam menghadapi uang", tetapi tulis "Raka [contoh perilaku Raka terhadap uang], sedangkan Lina [contoh perilaku Lina terhadap uang]" agar pembaca melihat bukti yang membuat rangkuman itu diambil.
+- PENTING: Gunakan konten dari SEMUA halaman dokumen (Halaman 1 sampai terakhir). Jangan hanya merangkum halaman terakhir - sertakan poin penting dari halaman awal dan tengah.
+- Jangan hanya menyatakan kesimpulan abstrak. Berikan contoh konkret dari dokumen yang mendukung kesimpulan itu.
 - Jaga struktur dan poin kunci. Tanpa pembukaan lain, langsung rangkuman saja.
 
 Dokumen:

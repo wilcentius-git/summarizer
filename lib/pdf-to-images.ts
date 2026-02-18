@@ -6,7 +6,7 @@
 import { createCanvas } from "@napi-rs/canvas/node-canvas";
 
 const MAX_PAGES = 20;
-const SCALE = 2;
+const SCALE = 3; // Higher resolution for better OCR of small text in diagrams/tables
 const JPEG_QUALITY = 0.85;
 
 export type PdfPageImage = {

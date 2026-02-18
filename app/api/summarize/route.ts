@@ -140,6 +140,7 @@ export async function POST(request: NextRequest) {
 - Istilah teknis (misalnya: API, PDF, database, framework, dll.) tetap gunakan istilah aslinya, jangan diterjemahkan.
 - Awali rangkuman dengan kalimat deskripsi dokumen, contoh: "Dokumen ini berisi hal tentang [topik utama dokumen]."
 - Setelah itu, lanjutkan dengan poin-poin penting secara ringkas.
+- Jangan hanya menyatakan kesimpulan abstrak (misalnya "mereka memiliki sikap yang berbeda"). Sebaliknya, berikan contoh konkret dari dokumen yang mendukung kesimpulan itu. Contoh: jangan tulis "Raka dan Lina berbeda dalam menghadapi uang", tetapi tulis "Raka [contoh perilaku Raka terhadap uang], sedangkan Lina [contoh perilaku Lina terhadap uang]" agar pembaca melihat bukti yang membuat rangkuman itu diambil.
 - Jaga struktur dan poin kunci. Tanpa pembukaan lain, langsung rangkuman saja.
 
 Dokumen:

@@ -1,6 +1,6 @@
 {
   "name": "summarizer",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -11,8 +11,10 @@
   },
   "dependencies": {
     "@google/genai": "^1.40.0",
+    "@napi-rs/canvas": "^0.1.93",
     "next": "14.2.18",
     "pdf-parse": "^1.1.1",
+    "pdfjs-dist": "^5.4.624",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },

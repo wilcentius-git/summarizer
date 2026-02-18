@@ -6,7 +6,7 @@ A simple web app to upload PDFs, compress them, and get AI-generated summaries.
 
 - **Upload PDFs** – Add files via file picker or drag and drop (max 500 MB per file).
 - **Compress** – Reduce PDF size; download the compressed file.
-- **Summarize** – Extract text and get a concise summary via Groq (Llama).
+- **Summarize** – Extract text and get a concise summary via Groq (Llama). Supports scanned PDFs via OCR and image understanding (Groq Vision).
 
 ## Setup
 
@@ -63,4 +63,6 @@ If the automatic download fails on Windows, [install Ghostscript manually](https
 ## Tech
 
 - Next.js 14 (App Router), React 18, TypeScript
-- **Ghostscript** for PDF compression, `pdf-parse` for text extraction, Groq API for summaries
+- **Ghostscript** for PDF compression
+- **pdf-parse** for text extraction; **pdfjs-dist** + **@napi-rs/canvas** for PDF-to-image when text is missing (scanned PDFs)
+- **Groq API** for summaries (text) and OCR/image understanding (Llama 4 Scout Vision)

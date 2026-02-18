@@ -82,9 +82,11 @@ async function downloadWindows() {
 }
 
 async function downloadLinux() {
+  // shelfio repo now has arch-specific zips (ghostscript.zip was removed)
+  const zipName = process.arch === "arm64" ? "ghostscript-arm64.zip" : "ghostscript-x86_64.zip";
   const GS_URLS = [
-    "https://media.githubusercontent.com/media/shelfio/ghostscript-lambda-layer/master/ghostscript.zip",
-    "https://cdn.jsdelivr.net/gh/shelfio/ghostscript-lambda-layer@master/ghostscript.zip",
+    `https://github.com/shelfio/ghostscript-lambda-layer/raw/master/${zipName}`,
+    `https://cdn.jsdelivr.net/gh/shelfio/ghostscript-lambda-layer@master/${zipName}`,
   ];
 
   let buf;

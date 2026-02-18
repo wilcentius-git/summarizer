@@ -62,10 +62,7 @@ async function compressWithGhostscript(buffer: Buffer): Promise<Buffer> {
     const args = [
       "-sDEVICE=pdfwrite",
       "-dCompatibilityLevel=1.4",
-      "-dPDFSETTINGS=/screen", // 72 dpi – avoids upsampling low-res images (which caused larger output)
-      "-dColorImageResolution=72",
-      "-dGrayImageResolution=72",
-      "-dMonoImageResolution=72",
+      "-dPDFSETTINGS=/ebook", // 150 dpi – balance of readability and size
       "-dNOPAUSE",
       "-dQUIET",
       "-dBATCH",
@@ -129,7 +126,10 @@ export async function POST(request: NextRequest) {
     }
 
     const buffer = Buffer.from(await file.arrayBuffer());
-    const body = await compressWithGhostscript(buffer);
+    const compressed = await compressWithGhostscript(buffer);
+
+    // If compression increased size, return original to avoid degrading quality for no benefit
+    const body = compressed.length < buffer.length ? compressed : buffer;
 
     return new NextResponse(new Uint8Array(body), {
       status: 200,

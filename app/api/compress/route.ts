@@ -103,14 +103,17 @@ export async function POST(request: NextRequest) {
 
     if (!file || !(file instanceof Blob)) {
       return NextResponse.json(
-        { error: "No PDF file provided." },
+        { error: "No file provided." },
         { status: 400 }
       );
     }
 
     if (file.type !== "application/pdf") {
       return NextResponse.json(
-        { error: "File must be a PDF." },
+        {
+          error:
+            "Compression is only available for PDF files. Other formats (DOCX, TXT, RTF, ODT) can be summarized but not compressed.",
+        },
         { status: 400 }
       );
     }

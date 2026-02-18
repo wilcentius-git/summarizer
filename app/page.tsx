@@ -10,6 +10,33 @@ const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
 /** Typical compression ratio for Ghostscript /ebook; 40% of original is a reasonable estimate */
 const ESTIMATED_COMPRESSION_RATIO = 0.4;
 
+const ACCEPTED_FILE_TYPES =
+  ".pdf,.docx,.doc,.txt,.rtf,.odt,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/msword,text/plain,application/rtf,text/rtf,application/vnd.oasis.opendocument.text";
+
+const SUPPORTED_MIME_TYPES = new Set([
+  "application/pdf",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/msword",
+  "text/plain",
+  "application/rtf",
+  "text/rtf",
+  "application/vnd.oasis.opendocument.text",
+]);
+
+function isPdf(file: File): boolean {
+  return file.type === "application/pdf";
+}
+
+function isSupportedFile(file: File): boolean {
+  if (SUPPORTED_MIME_TYPES.has(file.type)) return true;
+  // Fallback: check extension when MIME is generic
+  if (file.type === "application/octet-stream" || !file.type) {
+    const ext = file.name.toLowerCase().slice(file.name.lastIndexOf("."));
+    return [".pdf", ".docx", ".doc", ".txt", ".rtf", ".odt"].includes(ext);
+  }
+  return false;
+}
+
 type FileItem = {
   id: string;
   file: File;
@@ -33,8 +60,10 @@ export default function Home() {
     const added: FileItem[] = [];
     for (let i = 0; i < newFiles.length; i++) {
       const file = newFiles[i];
-      if (file.type !== "application/pdf") {
-        setError("Only PDF files are allowed.");
+      if (!isSupportedFile(file)) {
+        setError(
+          "Unsupported file type. Supported: PDF, DOCX, DOC, TXT, RTF, ODT."
+        );
         continue;
       }
       if (file.size > MAX_FILE_SIZE_BYTES) {
@@ -152,7 +181,7 @@ export default function Home() {
           <h1 className="text-2xl font-bold text-kemenkum-blue">Kemenkum Summarizer</h1>
         </div>
         <p className="text-gray-600 mb-8">
-          Kurangi ukuran file dengan tetap mengoptimalkan kualitas PDF maksimal.
+          Unggah dokumen (PDF, DOCX, TXT, RTF, ODT) untuk diringkas atau dikompresi.
         </p>
 
         <div
@@ -167,16 +196,18 @@ export default function Home() {
           <label className="cursor-pointer">
             <input
               type="file"
-              accept=".pdf,application/pdf"
+              accept={ACCEPTED_FILE_TYPES}
               multiple
               className="hidden"
               onChange={(e) => addFiles(e.target.files)}
             />
             <span className="inline-block px-10 py-3 rounded-2xl bg-kemenkum-blue text-white font-medium text-base hover:opacity-90">
-              Pilih file PDF
+              Pilih file dokumen
             </span>
           </label>
-          <p className="text-sm text-gray-600">atau jatuhkan PDF di sini</p>
+          <p className="text-sm text-gray-600">
+            atau jatuhkan file di sini (PDF, DOCX, TXT, RTF, ODT)
+          </p>
         </div>
 
         {error && (
@@ -198,20 +229,27 @@ export default function Home() {
                     <p className="font-medium text-gray-900 truncate">{item.name}</p>
                     <p className="text-sm text-gray-500">
                       {formatSize(item.size)}
-                      <span className="text-gray-400 ml-1">
-                        (
-                        {compressedSizes[item.id] != null
-                          ? `~${formatSize(compressedSizes[item.id])} after compression`
-                          : `est. ~${formatSize(Math.round(item.size * ESTIMATED_COMPRESSION_RATIO))} after compression`}
-                        )
-                      </span>
+                      {isPdf(item.file) && (
+                        <span className="text-gray-400 ml-1">
+                          (
+                          {compressedSizes[item.id] != null
+                            ? `~${formatSize(compressedSizes[item.id])} after compression`
+                            : `est. ~${formatSize(Math.round(item.size * ESTIMATED_COMPRESSION_RATIO))} after compression`}
+                          )
+                        </span>
+                      )}
                     </p>
                   </div>
                   <div className="flex items-center gap-2">
                     <button
                       type="button"
                       onClick={() => handleCompress(item)}
-                      disabled={!!compressLoading}
+                      disabled={!!compressLoading || !isPdf(item.file)}
+                      title={
+                        !isPdf(item.file)
+                          ? "Compression is only available for PDF files"
+                          : undefined
+                      }
                       className="px-4 py-2 rounded-lg bg-kemenkum-blue text-white text-sm font-medium hover:opacity-90 disabled:opacity-60"
                     >
                       {compressLoading === item.id ? "Compressing…" : "Compress"}

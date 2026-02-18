@@ -1,9 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import {
+  extractText,
+  isSupportedFileName,
+  isSupportedMimeType,
+  resolveMimeType,
+} from "@/lib/extract-text";
 import { pdfPagesToImages, type PdfPageImage } from "@/lib/pdf-to-images";
-
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const pdfParse = require("pdf-parse");
 
 const MAX_FILE_SIZE_BYTES = 500 * 1024 * 1024; // 500 MB
 const MAX_TEXT_LENGTH = 12000; // truncate for context limit
@@ -72,14 +75,19 @@ export async function POST(request: NextRequest) {
 
     if (!file || !(file instanceof Blob)) {
       return NextResponse.json(
-        { error: "No PDF file provided." },
+        { error: "No document file provided." },
         { status: 400 }
       );
     }
 
-    if (file.type !== "application/pdf") {
+    const fileName = file instanceof File ? file.name : "file";
+    const resolvedMime = resolveMimeType(file.type, fileName);
+    if (!isSupportedMimeType(resolvedMime) && !isSupportedFileName(fileName)) {
       return NextResponse.json(
-        { error: "File must be a PDF." },
+        {
+          error:
+            "Unsupported file type. Supported: PDF, DOCX, DOC, TXT, RTF, ODT.",
+        },
         { status: 400 }
       );
     }
@@ -92,39 +100,32 @@ export async function POST(request: NextRequest) {
     }
 
     const buffer = Buffer.from(await file.arrayBuffer());
-    const data = await pdfParse(buffer);
-    let text: string = data?.text ?? "";
 
-    // Fallback to OCR + vision when text extraction yields little (e.g. scanned PDFs)
-    if (!text.trim() || text.length < MIN_TEXT_FOR_SKIP_OCR) {
-      try {
-        const images = await pdfPagesToImages(buffer, { maxPages: 20 });
-        if (images.length > 0) {
-          const chunks: string[] = [];
-          for (let i = 0; i < images.length; i += GROQ_IMAGES_PER_REQUEST) {
-            const batch = images.slice(i, i + GROQ_IMAGES_PER_REQUEST);
-            const extracted = await extractTextFromImages(batch, apiKey);
-            if (extracted) chunks.push(extracted);
+    const ocrFallback =
+      resolvedMime === "application/pdf"
+        ? async (images: PdfPageImage[]) => {
+            const chunks: string[] = [];
+            for (let i = 0; i < images.length; i += GROQ_IMAGES_PER_REQUEST) {
+              const batch = images.slice(i, i + GROQ_IMAGES_PER_REQUEST);
+              const extracted = await extractTextFromImages(batch, apiKey);
+              if (extracted) chunks.push(extracted);
+            }
+            return chunks.join("\n\n");
           }
-          text = chunks.join("\n\n");
-        }
-      } catch (ocrErr) {
-        console.error("OCR fallback error:", ocrErr);
-        if (!text.trim()) {
-          return NextResponse.json(
-            {
-              error:
-                "No text could be extracted. The PDF may be scanned—OCR failed. Try a different file.",
-            },
-            { status: 400 }
-          );
-        }
-      }
-    }
+        : undefined;
+
+    let text = await extractText(buffer, resolvedMime, {
+      ocrFallback,
+    });
 
     if (!text.trim()) {
       return NextResponse.json(
-        { error: "No text could be extracted from the PDF." },
+        {
+          error:
+            resolvedMime === "application/pdf"
+              ? "No text could be extracted. The PDF may be scanned—OCR failed. Try a different file."
+              : "No text could be extracted from the document.",
+        },
         { status: 400 }
       );
     }
@@ -134,8 +135,16 @@ export async function POST(request: NextRequest) {
     }
 
     const prompt =
-      "Summarize the following document concisely. Preserve key points and structure. Respond with the summary only, no preamble.\n\n" +
-      text;
+      `Anda adalah asisten yang merangkum dokumen. Aturan:
+- Tulis rangkuman dalam Bahasa Indonesia.
+- Istilah teknis (misalnya: API, PDF, database, framework, dll.) tetap gunakan istilah aslinya, jangan diterjemahkan.
+- Awali rangkuman dengan kalimat deskripsi dokumen, contoh: "Dokumen ini berisi hal tentang [topik utama dokumen]."
+- Setelah itu, lanjutkan dengan poin-poin penting secara ringkas.
+- Jaga struktur dan poin kunci. Tanpa pembukaan lain, langsung rangkuman saja.
+
+Dokumen:
+
+` + text;
 
     const groqResponse = await fetch(GROQ_API_URL, {
       method: "POST",
@@ -164,7 +173,7 @@ export async function POST(request: NextRequest) {
       choices?: Array<{ message?: { content?: string } }>;
     };
     const content = json.choices?.[0]?.message?.content?.trim();
-    const summary = content ?? "No summary generated.";
+    const summary = content ?? "Rangkuman tidak dapat dibuat.";
 
     return NextResponse.json({ summary });
   } catch (err) {

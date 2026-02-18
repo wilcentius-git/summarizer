@@ -3,25 +3,45 @@ import { spawn } from "child_process";
 import { writeFile, readFile, unlink, access } from "fs/promises";
 import { tmpdir } from "os";
 import { join } from "path";
+import { readdirSync, statSync } from "fs";
 
 const MAX_FILE_SIZE_BYTES = 500 * 1024 * 1024; // 500 MB
 
-/** Path to bundled Ghostscript (shelfio zip has both Linux and Windows) */
 const GS_DIR = join(process.cwd(), "bin", "ghostscript");
 const BUNDLED_GS_LINUX = join(GS_DIR, "bin", "gs");
 const BUNDLED_GS_WIN = join(GS_DIR, "gswin64c.exe");
 
-/** Ghostscript executable: bundled only */
-async function getGhostscriptCommand(): Promise<string> {
-  const path = process.platform === "win32" ? BUNDLED_GS_WIN : BUNDLED_GS_LINUX;
+function findGswin64c(dir: string): string | null {
   try {
-    await access(path);
-    return path;
-  } catch {
-    throw new Error(
-      "Ghostscript not found. Run 'npm run build' or 'npm run setup:ghostscript' to download the bundled binary."
-    );
+    for (const e of readdirSync(dir)) {
+      const p = join(dir, e);
+      if (statSync(p).isDirectory()) {
+        const found = findGswin64c(p);
+        if (found) return found;
+      } else if (e === "gswin64c.exe") return p;
+    }
+  } catch {}
+  return null;
+}
+
+async function getGhostscriptCommand(): Promise<string> {
+  if (process.platform === "win32") {
+    try {
+      await access(BUNDLED_GS_WIN);
+      return BUNDLED_GS_WIN;
+    } catch {
+      const found = findGswin64c(GS_DIR);
+      if (found) return found;
+    }
+  } else {
+    try {
+      await access(BUNDLED_GS_LINUX);
+      return BUNDLED_GS_LINUX;
+    } catch {}
   }
+  throw new Error(
+    "Ghostscript not found. Run 'npm run build' or 'npm run setup:ghostscript' to download the bundled binary."
+  );
 }
 
 /**

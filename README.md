@@ -6,7 +6,7 @@ A simple web app to upload PDFs, compress them, and get AI-generated summaries.
 
 - **Upload PDFs** – Add files via file picker or drag and drop (max 500 MB per file).
 - **Compress** – Reduce PDF size; download the compressed file.
-- **Summarize** – Extract text and get a concise summary via Google Gemini.
+- **Summarize** – Extract text and get a concise summary via Groq (Llama).
 
 ## Setup
 
@@ -16,12 +16,15 @@ A simple web app to upload PDFs, compress them, and get AI-generated summaries.
    npm install
    ```
 
-2. Download the bundled Ghostscript (runs automatically on `npm run build`, or run `npm run setup:ghostscript` once).
+2. Download Ghostscript (runs automatically on `npm run build`, or run `npm run setup:ghostscript` once):
 
-3. Set your Google (Gemini) API key for the summarization feature:
+   - **Windows:** Downloads and installs Ghostscript 9.54 to `bin/ghostscript/` (may require approving the installer).
+   - **Linux:** Downloads the Linux binary (for Vercel, WSL, or native Linux).
+
+3. Set your Groq API key for the summarization feature:
 
    - Copy `.env.local.example` to `.env.local`.
-   - Add your key: `GOOGLE_API_KEY=your-key` (get one at [Google AI Studio](https://aistudio.google.com/apikey))
+   - Add your key: `GROQ_API_KEY=your-key` (get a free key at [console.groq.com](https://console.groq.com))
 
 4. Run the dev server:
 
@@ -40,7 +43,7 @@ npm start
 
 ## Deploy to Vercel
 
-Ghostscript is automatically used on Vercel. The build downloads a Linux Ghostscript binary during `npm run build` (Linux only). No extra setup needed—just deploy:
+Ghostscript is automatically used on Vercel. The build downloads a Linux Ghostscript binary during `npm run build`. Set `GROQ_API_KEY` in your Vercel project environment variables. No extra setup needed—just deploy:
 
 ```bash
 vercel
@@ -50,11 +53,14 @@ Or connect your repo to [Vercel](https://vercel.com) for automatic deployments.
 
 ## Compression (Ghostscript)
 
-The compressor uses a **bundled Ghostscript Linux binary** (same for local and Vercel). The binary is downloaded during `npm run build` or via `npm run setup:ghostscript`.
+The compressor uses a **bundled Ghostscript binary** downloaded during `npm run build` or via `npm run setup:ghostscript`:
 
-**Run locally with Linux:** Use WSL, Docker, or native Linux so the Linux binary can run. On Windows without WSL/Docker, install Ghostscript and add `bin/ghostscript` manually, or run the app in WSL/Docker.
+- **Windows:** Ghostscript 9.54 is installed to `bin/ghostscript/` (no PATH changes needed).
+- **Linux:** Linux binary from shelfio (for Vercel, WSL, or native Linux).
+
+If the automatic download fails on Windows, [install Ghostscript manually](https://ghostscript.com/releases/gsdnld.html) and copy `gswin64c.exe` (and its folder) to `bin/ghostscript/`.
 
 ## Tech
 
 - Next.js 14 (App Router), React 18, TypeScript
-- **Ghostscript** for PDF compression, `pdf-parse` for text extraction, Google Gemini API for summaries
+- **Ghostscript** for PDF compression, `pdf-parse` for text extraction, Groq API for summaries

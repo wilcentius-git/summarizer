@@ -70,6 +70,7 @@ const RISK_LABELS: Record<string, string> = {
   hedging: "Hedging",
   concession_flip: "Setuju + pemblokir",
   vagueness: "Kesepakatan samar",
+  deflection: "Defleksi / penghindaran",
   inconsistency: "Ketidakonsistenan",
   no_ownership: "Tanpa kepemilikan",
 };

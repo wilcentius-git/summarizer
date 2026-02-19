@@ -102,10 +102,25 @@ function buildUserPrompt(
 
 Task: For each participant (EXCLUDE the leader "${leaderName}"), extract topic-level stances and alignment risks.
 
+Classify stance toward leader using Indonesian markers. Apply the same classification to any phrase with similar meaning or context.
+
+STRONG SUPPORT — stance "support", agreement_confidence 4–5:
+"setuju", "sepakat", "gas", "jalan", "oke, eksekusi", "saya dukung", "ini paling masuk akal", "kita commit". Same for similar: "saya setuju penuh", "mantap", "oke lanjut", etc.
+
+SOFT SUPPORT / performative agreement risk — stance "mixed", flag as risk:
+"iya…", "boleh sih", "oke juga", "yaudah", "ikut aja", "terserah", "setuju, tapi…", "sepakat, cuma…", "boleh, hanya…", "nanti kita lihat", "kayaknya", "mungkin", "sepertinya", "kalau bisa", "kalau memungkinkan", "idealnya", "noted", "siap" (without detail). Same for similar: "oke deh", "terserah deh", "ikut saja", etc.
+
+OPPOSE — stance "oppose", agreement_confidence 1–2:
+"kurang setuju", "saya tidak sepakat", "menurut saya ini riskan", "jangan dulu", "ini belum siap", "ini terlalu cepat", "nggak masuk". Same for similar: "tidak setuju", "belum siap", "terlalu riskan", etc.
+
+DEFLECTION / AVOIDANCE — flag as risk type "deflection":
+"tergantung", "balik lagi", "lihat nanti", "diinfokan aja", "mohon arahan", "menyesuaikan". Same for similar: "nanti saja", "ikuti arahan", "menunggu keputusan", etc.
+
 Risk types (score 0–1, higher = stronger signal). Apply ONLY to opinion/stance, NOT to informational content:
-- hedging: opinion expressed with "mungkin"/"kayaknya"/"oke"/"siap" without substance
-- concession_flip: opinion "setuju, tapi..." / "oke, namun..." with blockers
-- vagueness: EMPTY agreement — "setuju"/"oke" with NO concrete follow-through, no owner, no deadline, no action. Do NOT flag when the speaker provides concrete solutions, mechanisms, or direct responses to concerns (e.g., "kami telah menyiapkan mekanisme logging" = addressing a concern = NOT vague)
+- hedging: soft support markers without substance (e.g., "mungkin"/"kayaknya"/"oke juga"/"siap" alone)
+- concession_flip: "setuju, tapi…" / "sepakat, cuma…" / "boleh, hanya…" with blockers (or similar)
+- vagueness: EMPTY agreement — "setuju"/"oke" with NO concrete follow-through. Do NOT flag when speaker provides concrete solutions or direct responses to concerns.
+- deflection: deflection/avoidance markers (e.g., "tergantung"/"mohon arahan"/"menyesuaikan" or similar)
 - inconsistency: support then oppose (or vice versa) on same topic
 - no_ownership: supports publicly, avoids tasks (only if visible)
 
@@ -117,7 +132,7 @@ Schema (strict):
       "speaker": "string",
       "agreement_confidence": 1,
       "points": [{"topic": "string", "stance": "support|mixed|oppose|unclear", "evidence": ["quote"]}],
-      "risks": [{"type": "hedging|concession_flip|vagueness|inconsistency|no_ownership", "score": 0.0, "evidence": ["quote"]}],
+      "risks": [{"type": "hedging|concession_flip|vagueness|deflection|inconsistency|no_ownership", "score": 0.0, "evidence": ["quote"]}],
       "summary": "One sentence: X shows [pattern] ([N] instances): [evidence]. Omit if no risks."
     }
   ]
@@ -145,6 +160,8 @@ CRITICAL — Information vs opinion:
 CRITICAL — Vagueness vs substantive response:
 - vagueness = empty "setuju"/"oke" with nothing concrete. No mechanism, no action, no answer to concerns.
 - Do NOT flag as vagueness when the speaker provides concrete solutions, mechanisms, or direct answers to concerns raised by opponent. Example: "Kami telah menyiapkan mekanisme logging dan versioning" = addressing audit/transparency concern = substantive, NOT vague.
+
+Similar context: When a phrase has similar meaning or intent to the markers above, classify it the same way (e.g., "saya mendukung" = strong support like "saya dukung"; "nggak yakin" = oppose like "kurang setuju").
 
 Transcript:
 

@@ -2,6 +2,7 @@
 
 import Image from "next/image";
 import { useCallback, useState } from "react";
+import ReactMarkdown from "react-markdown";
 
 import kemenkumLogo from "@/assets/kemenkum_logo.png";
 
@@ -204,7 +205,11 @@ export default function Home() {
   const [dragActive, setDragActive] = useState(false);
   const [compressLoading, setCompressLoading] = useState<string | null>(null);
   const [summarizeLoading, setSummarizeLoading] = useState<string | null>(null);
-  const [summary, setSummary] = useState<{ fileId: string; text: string } | null>(null);
+  const [summary, setSummary] = useState<{
+    fileId: string;
+    fileName: string;
+    text: string;
+  } | null>(null);
   const [compressSuccess, setCompressSuccess] = useState<string | null>(null);
   const [compressedSizes, setCompressedSizes] = useState<Record<string, number>>({});
   const [error, setError] = useState<string | null>(null);
@@ -323,7 +328,7 @@ export default function Home() {
         throw new Error(data.error || `Summarize failed: ${res.status}`);
       }
       const data = await res.json();
-      setSummary({ fileId: item.id, text: data.summary ?? "" });
+      setSummary({ fileId: item.id, fileName: item.name, text: data.summary ?? "" });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Summarize failed.");
     } finally {
@@ -335,6 +340,66 @@ export default function Home() {
     if (!summary?.text) return;
     navigator.clipboard.writeText(summary.text);
   }, [summary?.text]);
+
+  const exportToPdf = useCallback(async () => {
+    if (!summary?.text) return;
+    const { jsPDF } = await import("jspdf");
+    const pdf = new jsPDF({ unit: "mm", format: "a4", orientation: "portrait" });
+    const margin = 15;
+    const pageW = pdf.internal.pageSize.getWidth();
+    const pageH = pdf.internal.pageSize.getHeight();
+    const maxW = pageW - 2 * margin;
+    const lineHeight = 6;
+    let y = margin;
+
+    const dateStr = new Date().toLocaleDateString("id-ID", {
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+    });
+
+    pdf.setFontSize(10);
+    pdf.setTextColor(100, 100, 100);
+    pdf.text(`Dokumen: ${summary.fileName ?? "—"}`, margin, y);
+    y += lineHeight;
+    pdf.text(`Tanggal dibuat: ${dateStr}`, margin, y);
+    y += lineHeight * 1.5;
+    pdf.setTextColor(0, 0, 0);
+    pdf.setFontSize(11);
+
+    const stripMarkdown = (s: string) =>
+      s
+        .replace(/\*\*(.+?)\*\*/g, "$1")
+        .replace(/\*(.+?)\*/g, "$1")
+        .replace(/^#+\s*/gm, "")
+        .replace(/^\s*[-*]\s+/gm, "• ")
+        .replace(/^\s*\d+\.\s+/gm, "");
+
+    const addPageIfNeeded = (needed: number) => {
+      if (y + needed > pageH - margin) {
+        pdf.addPage();
+        y = margin;
+      }
+    };
+
+    const lines = stripMarkdown(summary.text).split(/\r?\n/);
+    pdf.setFontSize(11);
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) {
+        y += lineHeight * 0.5;
+        continue;
+      }
+      const wrapped = pdf.splitTextToSize(trimmed, maxW);
+      addPageIfNeeded(wrapped.length * lineHeight);
+      pdf.text(wrapped, margin, y);
+      y += wrapped.length * lineHeight;
+    }
+
+    const baseName = (summary.fileName ?? "document").replace(/\.[^/.]+$/, "");
+    pdf.save(`${baseName}_summary.pdf`);
+  }, [summary?.text, summary?.fileName]);
 
   const openMeetingModal = useCallback((item: FileItem) => {
     setError(null);
@@ -589,21 +654,28 @@ export default function Home() {
 
         {summary && (
           <section className="mt-8 text-center">
-            <h2 className="text-base font-semibold text-kemenkum-blue mb-2">Summary</h2>
-            <div className="relative">
-              <textarea
-                readOnly
-                value={summary.text}
-                rows={10}
-                className="w-full p-4 rounded-lg border border-gray-200 bg-gray-50 text-gray-900 resize-y text-center"
-              />
-              <button
-                type="button"
-                onClick={copySummary}
-                className="absolute top-2 right-2 px-3 py-1.5 rounded bg-kemenkum-yellow text-kemenkum-blue text-sm font-medium hover:opacity-90"
-              >
-                Copy
-              </button>
+            <div className="flex items-center w-full mb-2">
+              <div className="flex-1" />
+              <h2 className="text-base font-semibold text-kemenkum-blue">Summary</h2>
+              <div className="flex-1 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={copySummary}
+                  className="px-3 py-1.5 rounded bg-kemenkum-yellow text-kemenkum-blue text-sm font-medium hover:opacity-90"
+                >
+                  Copy
+                </button>
+                <button
+                  type="button"
+                  onClick={exportToPdf}
+                  className="px-3 py-1.5 rounded bg-kemenkum-yellow text-kemenkum-blue text-sm font-medium hover:opacity-90"
+                >
+                  Export to PDF
+                </button>
+              </div>
+            </div>
+            <div className="w-full p-4 rounded-lg border border-gray-200 bg-gray-50 text-gray-900 text-left min-h-[200px] max-h-[400px] overflow-y-auto [&_h1]:text-xl [&_h1]:font-bold [&_h1]:mt-2 [&_h1]:mb-1 [&_h2]:text-lg [&_h2]:font-semibold [&_h2]:mt-3 [&_h2]:mb-1 [&_h3]:text-base [&_h3]:font-medium [&_h3]:mt-2 [&_h3]:mb-1 [&_p]:mb-2 [&_ul]:list-disc [&_ul]:pl-6 [&_ul]:mb-2 [&_ol]:list-decimal [&_ol]:pl-6 [&_ol]:mb-2 [&_li]:mb-0.5 [&_strong]:font-semibold">
+              <ReactMarkdown>{summary.text}</ReactMarkdown>
             </div>
           </section>
         )}

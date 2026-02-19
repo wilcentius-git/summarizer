@@ -1,6 +1,6 @@
 {
   "name": "summarizer",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -11,12 +11,14 @@
   },
   "dependencies": {
     "@napi-rs/canvas": "^0.1.93",
+    "jspdf": "^4.1.0",
     "mammoth": "^1.11.0",
     "next": "14.2.18",
     "pdf-parse": "^1.1.1",
     "pdfjs-dist": "^5.4.624",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "react-markdown": "^10.1.0",
     "rtf-parser": "^1.3.3"
   },
   "devDependencies": {

@@ -80,12 +80,62 @@ Pertahankan urutan. Kembalikan sebagai teks biasa dalam Bahasa Indonesia.`;
   return extracted;
 }
 
+/**
+ * Preprocesses and normalizes a meeting transcript for consistent parsing.
+ * - Normalizes whitespace and line endings
+ * - Parses "Speaker: text" turns (handles "Name:", "Name :", "Bpk. Name:", etc.)
+ * - Strips common Indonesian prefixes (Bpk., Bapak, Ibu, Pak, Bu) for canonical speaker names
+ * - Ensures consistent "Speaker: text" format with clear turn separation
+ */
+function normalizeTranscript(raw: string): string {
+  let text = raw
+    .replace(/\r\n|\r/g, "\n")
+    .replace(/[ \t]+/g, " ")
+    .trim();
+
+  const lines = text.split("\n");
+  const turns: Array<{ speaker: string; text: string }> = [];
+  const speakerPattern = /^([^:\n]+)\s*:\s*(.*)$/;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) continue;
+
+    const match = line.match(speakerPattern);
+    if (match) {
+      const rawSpeaker = match[1].trim();
+      const content = match[2].trim();
+      const speaker = rawSpeaker
+        .replace(/^(Bpk\.?|Bapak|Pak|Ibu|Bu)\s+/i, "")
+        .trim() || rawSpeaker;
+      if (content) {
+        turns.push({ speaker, text: content });
+      } else {
+        let continuation = "";
+        while (i + 1 < lines.length && lines[i + 1].trim() && !lines[i + 1].trim().match(speakerPattern)) {
+          i++;
+          continuation += (continuation ? " " : "") + lines[i].trim();
+        }
+        if (continuation) {
+          turns.push({ speaker, text: continuation });
+        }
+      }
+    } else if (turns.length > 0) {
+      turns[turns.length - 1].text += " " + line;
+    }
+  }
+
+  return turns.map((t) => `${t.speaker}: ${t.text}`).join("\n\n");
+}
+
 const SYSTEM_PROMPT = `You are a meeting analysis engine for Indonesian business conversations.
 Extract structured facts. Never label anyone as "imposter", "liar", or "performative".
 Output alignment risk indicators as observable patterns with evidence, not character judgments.
 If uncertain, use stance "unclear".
 
 IMPORTANT: Distinguish information from opinion. Factual reports, data, statistics, and neutral descriptions are NOT disagreement or risk. Only flag opinion/stance with intent. Informational content counts as disagreement ONLY if it contains hidden intent to attack or offend.
+
+CRITICAL: Deferral ("ikut keputusan manajemen saja", "siap menyesuaikan", "ikuti arahan") is NOT opposition. Attribute each quote ONLY to the speaker who said it — verify against the transcript.
 
 Return ONLY valid JSON. No markdown.`;
 
@@ -107,22 +157,27 @@ Classify stance toward leader using Indonesian markers. Apply the same classific
 STRONG SUPPORT — stance "support", agreement_confidence 4–5:
 "setuju", "sepakat", "gas", "jalan", "oke, eksekusi", "saya dukung", "ini paling masuk akal", "kita commit". Same for similar: "saya setuju penuh", "mantap", "oke lanjut", etc.
 
-SOFT SUPPORT / performative agreement risk — stance "mixed", flag as risk:
-"iya…", "boleh sih", "oke juga", "yaudah", "ikut aja", "terserah", "setuju, tapi…", "sepakat, cuma…", "boleh, hanya…", "nanti kita lihat", "kayaknya", "mungkin", "sepertinya", "kalau bisa", "kalau memungkinkan", "idealnya", "noted", "siap" (without detail). Same for similar: "oke deh", "terserah deh", "ikut saja", etc.
+SOFT SUPPORT / weak agreement / deferral — stance "mixed", flag as risk:
+Weak agreement = agree but not fully committed. Deferral to others = NOT oppose. Key markers: "ya, saya mengikuti saja", "ikut aja", "ikut saja", "ikut keputusan manajemen saja", "siap menyesuaikan", "iya…", "boleh sih", "oke juga", "yaudah", "terserah", "setuju, tapi…", "sepakat, cuma…", "boleh, hanya…", "nanti kita lihat", "kayaknya", "mungkin", "sepertinya", "kalau bisa", "kalau memungkinkan", "idealnya", "noted", "siap" (without detail). Same for similar: "oke deh", "terserah deh", "ikuti keputusan", "ikut arahan", etc.
 
 OPPOSE — stance "oppose", agreement_confidence 1–2:
-"kurang setuju", "saya tidak sepakat", "menurut saya ini riskan", "jangan dulu", "ini belum siap", "ini terlalu cepat", "nggak masuk". Same for similar: "tidak setuju", "belum siap", "terlalu riskan", etc.
+ONLY when speaker explicitly disagrees or rejects. "kurang setuju", "saya tidak sepakat", "menolak", "menurut saya ini riskan", "jangan dulu", "ini belum siap", "ini terlalu cepat", "nggak masuk". Same for similar: "tidak setuju", "belum siap", "terlalu riskan", etc.
+Do NOT use oppose for deferral ("ikut keputusan manajemen saja", "siap menyesuaikan") — those are mixed/deflection.
 
-DEFLECTION / AVOIDANCE — flag as risk type "deflection":
-"tergantung", "balik lagi", "lihat nanti", "diinfokan aja", "mohon arahan", "menyesuaikan". Same for similar: "nanti saja", "ikuti arahan", "menunggu keputusan", etc.
+DEFLECTION / AVOIDANCE — stance "mixed", flag as risk type "deflection":
+"tergantung", "balik lagi", "lihat nanti", "diinfokan aja", "mohon arahan", "menyesuaikan", "ikut keputusan manajemen saja", "siap menyesuaikan". Same for similar: "nanti saja", "ikuti arahan", "menunggu keputusan", etc.
 
 Risk types (score 0–1, higher = stronger signal). Apply ONLY to opinion/stance, NOT to informational content:
-- hedging: soft support markers without substance (e.g., "mungkin"/"kayaknya"/"oke juga"/"siap" alone)
+- hedging: weak agreement without substance (e.g., "ya, saya mengikuti saja"/"ikut saja"/"mungkin"/"kayaknya"/"oke juga"/"siap" alone)
 - concession_flip: "setuju, tapi…" / "sepakat, cuma…" / "boleh, hanya…" with blockers (or similar)
 - vagueness: EMPTY agreement — "setuju"/"oke" with NO concrete follow-through. Do NOT flag when speaker provides concrete solutions or direct responses to concerns.
 - deflection: deflection/avoidance markers (e.g., "tergantung"/"mohon arahan"/"menyesuaikan" or similar)
-- inconsistency: support then oppose (or vice versa) on same topic
+- inconsistency: ONLY when speaker contradicts themselves on the SAME topic (e.g., first supports, then opposes). Do NOT use for the same vague phrase ("ikut saja", etc.) repeated across different topics — that is hedging/vagueness, not inconsistency.
 - no_ownership: supports publicly, avoids tasks (only if visible)
+
+Risk evidence rules:
+- Each risk type should have distinct evidence when possible. Do NOT assign the same quote to multiple risk types unless it clearly demonstrates each.
+- Score: 0.3–0.5 = moderate signal, 0.6–0.8 = strong signal. Vary scores by strength of evidence — avoid identical scores for all risks.
 
 Schema (strict):
 {
@@ -133,7 +188,7 @@ Schema (strict):
       "agreement_confidence": 1,
       "points": [{"topic": "string", "stance": "support|mixed|oppose|unclear", "evidence": ["quote"]}],
       "risks": [{"type": "hedging|concession_flip|vagueness|deflection|inconsistency|no_ownership", "score": 0.0, "evidence": ["quote"]}],
-      "summary": "One sentence: X shows [pattern] ([N] instances): [evidence]. Omit if no risks."
+      "summary": "One concise sentence: X shows [pattern]. Omit if no risks. Do not repeat the same evidence multiple times."
     }
   ]
 }
@@ -142,12 +197,17 @@ agreement_confidence: 1–5 scale. 1 = not agree at all, 5 = fully agree with le
 MUST be consistent with points: if most/all points are "oppose" → 1–2; if most "support" → 4–5; if "mixed" → 3.
 Never output 4/5 when points show opposition. Never output 1/2 when points show support.
 
+CRITICAL — Speaker attribution:
+- Each participant's points and risks must use ONLY quotes from that speaker's own turns. Before adding any evidence, verify: does this exact quote appear in the transcript under THIS speaker's name?
+- WRONG: Putting Budi's quote under Rina's entry, or Rina's quote under Budi's. RIGHT: Only use quotes from the speaker's own "Name: text" blocks.
+- Process one speaker at a time: list their turns from the transcript, then extract points/risks from those turns only. Do not mix speakers.
+
 Rules:
 - Exclude leader from participants.
 - ONE ENTRY PER PERSON: Each speaker appears exactly ONCE in participants. Combine ALL their opinions, points, and risks into that single entry. Do not split by opinion — group by person.
 - points: all topic-level stances for this person in one array. At least one per participant.
 - risks: all observed risks for this person in one array. score 0–1. evidence: exact quotes.
-- summary: one brief narrative when risks exist. Omit if empty.
+- summary: one brief narrative when risks exist. Keep concise; avoid repeating the same evidence multiple times. Omit if empty.
 - Do not invent content.
 
 CRITICAL — Information vs opinion:
@@ -160,6 +220,10 @@ CRITICAL — Information vs opinion:
 CRITICAL — Vagueness vs substantive response:
 - vagueness = empty "setuju"/"oke" with nothing concrete. No mechanism, no action, no answer to concerns.
 - Do NOT flag as vagueness when the speaker provides concrete solutions, mechanisms, or direct answers to concerns raised by opponent. Example: "Kami telah menyiapkan mekanisme logging dan versioning" = addressing audit/transparency concern = substantive, NOT vague.
+
+CRITICAL — Deferral is NOT opposition:
+- "Saya ikut keputusan manajemen saja", "siap menyesuaikan", "ikuti arahan", "ikut keputusan" = speaker defers to others. Classify as "mixed" (not oppose). Flag as deflection/hedging risk if applicable.
+- Opposition requires explicit disagreement ("tidak setuju", "menolak", "kurang setuju"). Deferral or "ikut saja" is NOT opposition.
 
 Similar context: When a phrase has similar meaning or intent to the markers above, classify it the same way (e.g., "saya mendukung" = strong support like "saya dukung"; "nggak yakin" = oppose like "kurang setuju").
 
@@ -328,6 +392,8 @@ export async function POST(request: NextRequest) {
         text.slice(0, MAX_TEXT_LENGTH) + "\n\n[Text truncated for length.]";
     }
 
+    text = normalizeTranscript(text);
+
     const userPrompt = buildUserPrompt(
       leaderName,
       leaderPosition || "(tidak disebutkan)",
@@ -393,7 +459,7 @@ export async function POST(request: NextRequest) {
     const raw = analysis as { participants: ParticipantShape[] };
     raw.participants = mergeParticipantsBySpeaker(raw.participants);
 
-    return NextResponse.json({ analysis });
+    return NextResponse.json({ analysis });   
   } catch (err) {
     console.error("Summarize meeting error:", err);
     const message =

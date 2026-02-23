@@ -1,11 +1,10 @@
 {
   "name": "summarizer",
-  "version": "0.6.1",
+  "version": "0.7.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "setup:ghostscript": "node scripts/download-ghostscript.mjs",
-    "build": "node scripts/download-ghostscript.mjs && next build",
+    "build": "next build",
     "start": "next start",
     "lint": "next lint"
   },

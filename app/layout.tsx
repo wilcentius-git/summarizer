@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Kemenkum Summarizer",
-  description: "Upload PDFs, compress them, and get AI summaries",
+  description: "Upload documents and get AI summaries",
 };
 
 export default function RootLayout({

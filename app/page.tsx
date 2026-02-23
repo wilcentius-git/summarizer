@@ -33,8 +33,6 @@ type MeetingAnalysis = {
 
 const MAX_FILE_SIZE_MB = 500;
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
-/** Typical compression ratio for Ghostscript /ebook; 40% of original is a reasonable estimate */
-const ESTIMATED_COMPRESSION_RATIO = 0.4;
 
 const ACCEPTED_FILE_TYPES =
   ".pdf,.docx,.doc,.txt,.rtf,.odt,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/msword,text/plain,application/rtf,text/rtf,application/vnd.oasis.opendocument.text";
@@ -48,10 +46,6 @@ const SUPPORTED_MIME_TYPES = new Set([
   "text/rtf",
   "application/vnd.oasis.opendocument.text",
 ]);
-
-function isPdf(file: File): boolean {
-  return file.type === "application/pdf";
-}
 
 const STANCE_STYLES: Record<string, string> = {
   support: "bg-emerald-100 text-emerald-800",
@@ -203,15 +197,12 @@ type FileItem = {
 export default function Home() {
   const [files, setFiles] = useState<FileItem[]>([]);
   const [dragActive, setDragActive] = useState(false);
-  const [compressLoading, setCompressLoading] = useState<string | null>(null);
   const [summarizeLoading, setSummarizeLoading] = useState<string | null>(null);
   const [summary, setSummary] = useState<{
     fileId: string;
     fileName: string;
     text: string;
   } | null>(null);
-  const [compressSuccess, setCompressSuccess] = useState<string | null>(null);
-  const [compressedSizes, setCompressedSizes] = useState<Record<string, number>>({});
   const [error, setError] = useState<string | null>(null);
 
   const [meetingModalState, setMeetingModalState] = useState<{
@@ -255,16 +246,10 @@ export default function Home() {
   const removeFile = useCallback((id: string) => {
     setFiles((prev) => prev.filter((f) => f.id !== id));
     if (summary?.fileId === id) setSummary(null);
-    if (compressSuccess === id) setCompressSuccess(null);
     if (meetingAnalysis?.fileId === id) setMeetingAnalysis(null);
     if (meetingModalState?.fileId === id) setMeetingModalState(null);
-    setCompressedSizes((prev) => {
-      const next = { ...prev };
-      delete next[id];
-      return next;
-    });
     setError(null);
-  }, [summary?.fileId, compressSuccess, meetingAnalysis?.fileId, meetingModalState?.fileId]);
+  }, [summary?.fileId, meetingAnalysis?.fileId, meetingModalState?.fileId]);
 
   const handleDrag = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -281,37 +266,6 @@ export default function Home() {
     },
     [addFiles]
   );
-
-  const handleCompress = useCallback(async (item: FileItem) => {
-    setError(null);
-    setCompressSuccess(null);
-    setCompressLoading(item.id);
-    try {
-      const formData = new FormData();
-      formData.append("file", item.file);
-      const res = await fetch("/api/compress", {
-        method: "POST",
-        body: formData,
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || `Compress failed: ${res.status}`);
-      }
-      const blob = await res.blob();
-      setCompressedSizes((prev) => ({ ...prev, [item.id]: blob.size }));
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = item.name.replace(/\.pdf$/i, "_compressed.pdf");
-      a.click();
-      URL.revokeObjectURL(url);
-      setCompressSuccess(item.id);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Compress failed.");
-    } finally {
-      setCompressLoading(null);
-    }
-  }, []);
 
   const handleSummarize = useCallback(async (item: FileItem) => {
     setError(null);
@@ -477,7 +431,7 @@ export default function Home() {
           <h1 className="text-2xl font-bold text-kemenkum-blue">Kemenkum Summarizer</h1>
         </div>
         <p className="text-gray-600 mb-8">
-          Unggah dokumen (PDF, DOCX, TXT, RTF, ODT) untuk diringkas atau dikompresi.
+          Unggah dokumen (PDF, DOCX, TXT, RTF, ODT) untuk diringkas.
         </p>
 
         <div
@@ -592,33 +546,9 @@ export default function Home() {
                 >
                   <div className="flex-1 min-w-0 text-center">
                     <p className="font-medium text-gray-900 truncate">{item.name}</p>
-                    <p className="text-sm text-gray-500">
-                      {formatSize(item.size)}
-                      {isPdf(item.file) && (
-                        <span className="text-gray-400 ml-1">
-                          (
-                          {compressedSizes[item.id] != null
-                            ? `~${formatSize(compressedSizes[item.id])} after compression`
-                            : `est. ~${formatSize(Math.round(item.size * ESTIMATED_COMPRESSION_RATIO))} after compression`}
-                          )
-                        </span>
-                      )}
-                    </p>
+                    <p className="text-sm text-gray-500">{formatSize(item.size)}</p>
                   </div>
                   <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => handleCompress(item)}
-                      disabled={!!compressLoading || !isPdf(item.file)}
-                      title={
-                        !isPdf(item.file)
-                          ? "Compression is only available for PDF files"
-                          : undefined
-                      }
-                      className="px-4 py-2 rounded-lg bg-kemenkum-blue text-white text-sm font-medium hover:opacity-90 disabled:opacity-60"
-                    >
-                      {compressLoading === item.id ? "Compressing…" : "Compress"}
-                    </button>
                     <button
                       type="button"
                       onClick={() => handleSummarize(item)}
@@ -643,9 +573,6 @@ export default function Home() {
                       Remove
                     </button>
                   </div>
-                  {compressSuccess === item.id && (
-                    <span className="w-full text-sm text-green-600">Download started.</span>
-                  )}
                 </li>
               ))}
             </ul>

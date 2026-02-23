@@ -1,13 +1,10 @@
 /**
- * Converts PDF pages to JPEG images for OCR/vision processing.
- * Uses pdfjs-dist + canvas (Node.js compatible).
+ * Converts PDF pages to images for OCR/vision processing.
+ * Uses pdf-to-img (pdfjs with proper canvas factory) to avoid multi-page rendering bugs.
  */
-
-import { createCanvas } from "@napi-rs/canvas/node-canvas";
 
 const MAX_PAGES = 20;
 const SCALE = 3; // Higher resolution for better OCR of small text in diagrams/tables
-const JPEG_QUALITY = 0.85;
 
 export type PdfPageImage = {
   pageNum: number;
@@ -18,41 +15,21 @@ export async function pdfPagesToImages(
   buffer: Buffer,
   options?: { maxPages?: number; scale?: number }
 ): Promise<PdfPageImage[]> {
-  const pdfjsLib = await import("pdfjs-dist/legacy/build/pdf.mjs");
-  pdfjsLib.GlobalWorkerOptions.workerSrc = "";
-
+  const { pdf } = await import("pdf-to-img");
   const maxPages = options?.maxPages ?? MAX_PAGES;
-  const scale = options?.scale ?? SCALE;
 
-  const data = new Uint8Array(buffer);
-  const loadingTask = pdfjsLib.getDocument({
-    data,
-    useSystemFonts: true,
-    disableFontFace: true,
-  });
-
-  const pdfDocument = await loadingTask.promise;
-  const numPages = Math.min(pdfDocument.numPages, maxPages);
   const results: PdfPageImage[] = [];
+  let pageNum = 0;
 
-  for (let i = 1; i <= numPages; i++) {
-    const page = await pdfDocument.getPage(i);
-    const viewport = page.getViewport({ scale });
-    const canvas = createCanvas(viewport.width, viewport.height);
-    const context = canvas.getContext("2d");
+  const document = await pdf(buffer, { scale: options?.scale ?? SCALE });
+  const pageLimit = Math.min(document.length, maxPages);
 
-    const renderTask = page.render({
-      canvas: canvas as unknown as HTMLCanvasElement,
-      canvasContext: context as unknown as CanvasRenderingContext2D,
-      viewport,
-    });
-    await renderTask.promise;
+  for await (const imageBuffer of document) {
+    pageNum += 1;
+    if (pageNum > pageLimit) break;
 
-    const imageBuffer = canvas.toBuffer("image/jpeg", { quality: JPEG_QUALITY });
-    const base64 = imageBuffer.toString("base64");
-    const dataUrl = `data:image/jpeg;base64,${base64}`;
-
-    results.push({ pageNum: i, base64: dataUrl });
+    const dataUrl = `data:image/png;base64,${imageBuffer.toString("base64")}`;
+    results.push({ pageNum, base64: dataUrl });
   }
 
   return results;

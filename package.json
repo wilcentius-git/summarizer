@@ -1,6 +1,6 @@
 {
   "name": "summarizer",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -14,6 +14,7 @@
     "mammoth": "^1.11.0",
     "next": "14.2.18",
     "pdf-parse": "^1.1.1",
+    "pdf-to-img": "^5.0.0",
     "pdfjs-dist": "^5.4.624",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",

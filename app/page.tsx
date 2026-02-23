@@ -1,10 +1,13 @@
 "use client";
 
 import Image from "next/image";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 
 import kemenkumLogo from "@/assets/kemenkum_logo.png";
+
+const GROQ_API_KEY_CACHE_DURATION_MS = 60 * 60 * 1000; // 1 hour
+const GROQ_API_KEY_CACHE_KEY = "groqApiKeyCache";
 
 type MeetingPoint = {
   topic: string;
@@ -194,10 +197,39 @@ type FileItem = {
   size: number;
 };
 
+function loadCachedGroqApiKey(): string {
+  if (typeof window === "undefined") return "";
+  try {
+    const stored = localStorage.getItem(GROQ_API_KEY_CACHE_KEY);
+    if (!stored) return "";
+    const { key, expiresAt } = JSON.parse(stored) as { key?: string; expiresAt?: number };
+    if (key && expiresAt && Date.now() < expiresAt) return key;
+    localStorage.removeItem(GROQ_API_KEY_CACHE_KEY);
+  } catch {
+    localStorage.removeItem(GROQ_API_KEY_CACHE_KEY);
+  }
+  return "";
+}
+
+function saveGroqApiKeyToCache(key: string) {
+  if (typeof window === "undefined" || !key.trim()) return;
+  const cache = { key: key.trim(), expiresAt: Date.now() + GROQ_API_KEY_CACHE_DURATION_MS };
+  localStorage.setItem(GROQ_API_KEY_CACHE_KEY, JSON.stringify(cache));
+}
+
 export default function Home() {
+  const [groqApiKey, setGroqApiKey] = useState("");
   const [files, setFiles] = useState<FileItem[]>([]);
   const [dragActive, setDragActive] = useState(false);
   const [summarizeLoading, setSummarizeLoading] = useState<string | null>(null);
+
+  useEffect(() => {
+    setGroqApiKey(loadCachedGroqApiKey());
+  }, []);
+
+  useEffect(() => {
+    if (groqApiKey.trim()) saveGroqApiKeyToCache(groqApiKey);
+  }, [groqApiKey]);
   const [summary, setSummary] = useState<{
     fileId: string;
     fileName: string;
@@ -267,28 +299,37 @@ export default function Home() {
     [addFiles]
   );
 
-  const handleSummarize = useCallback(async (item: FileItem) => {
-    setError(null);
-    setSummarizeLoading(item.id);
-    try {
-      const formData = new FormData();
-      formData.append("file", item.file);
-      const res = await fetch("/api/summarize", {
-        method: "POST",
-        body: formData,
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || `Summarize failed: ${res.status}`);
+  const handleSummarize = useCallback(
+    async (item: FileItem) => {
+      const key = groqApiKey.trim();
+      if (!key) {
+        setError("Masukkan Groq API key terlebih dahulu. Dapatkan di console.groq.com");
+        return;
       }
-      const data = await res.json();
-      setSummary({ fileId: item.id, fileName: item.name, text: data.summary ?? "" });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Summarize failed.");
-    } finally {
-      setSummarizeLoading(null);
-    }
-  }, []);
+      setError(null);
+      setSummarizeLoading(item.id);
+      try {
+        const formData = new FormData();
+        formData.append("file", item.file);
+        formData.append("groqApiKey", key);
+        const res = await fetch("/api/summarize", {
+          method: "POST",
+          body: formData,
+        });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data.error || `Summarize failed: ${res.status}`);
+        }
+        const data = await res.json();
+        setSummary({ fileId: item.id, fileName: item.name, text: data.summary ?? "" });
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Summarize failed.");
+      } finally {
+        setSummarizeLoading(null);
+      }
+    },
+    [groqApiKey]
+  );
 
   const copySummary = useCallback(() => {
     if (!summary?.text) return;
@@ -378,6 +419,11 @@ export default function Home() {
         setError("Nama wajib diisi.");
         return;
       }
+      const key = groqApiKey.trim();
+      if (!key) {
+        setError("Masukkan Groq API key terlebih dahulu. Dapatkan di console.groq.com");
+        return;
+      }
       setError(null);
       setMeetingLoading(item.id);
       try {
@@ -385,6 +431,7 @@ export default function Home() {
         formData.append("file", item.file);
         formData.append("leaderName", state.leaderName.trim());
         formData.append("leaderPosition", state.leaderPosition.trim());
+        formData.append("groqApiKey", key);
         const res = await fetch("/api/summarize-meeting", {
           method: "POST",
           body: formData,
@@ -410,7 +457,7 @@ export default function Home() {
         setMeetingLoading(null);
       }
     },
-    [meetingModalState, files]
+    [meetingModalState, files, groqApiKey]
   );
 
   const formatSize = (bytes: number) => {
@@ -430,9 +477,34 @@ export default function Home() {
           <Image src={kemenkumLogo} alt="Kemenkum" width={48} height={48} />
           <h1 className="text-2xl font-bold text-kemenkum-blue">Kemenkum Summarizer</h1>
         </div>
-        <p className="text-gray-600 mb-8">
+        <p className="text-gray-600 mb-6">
           Unggah dokumen (PDF, DOCX, TXT, RTF, ODT) untuk diringkas.
         </p>
+
+        <div className="w-full max-w-md mx-auto mb-6 text-left">
+          <label htmlFor="groq-api-key" className="block text-sm font-medium text-gray-700 mb-1">
+            Groq API Key <span className="text-gray-500">(disimpan 1 jam)</span>
+          </label>
+          <input
+            id="groq-api-key"
+            type="password"
+            value={groqApiKey}
+            onChange={(e) => setGroqApiKey(e.target.value)}
+            placeholder="gsk_..."
+            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-gray-900 placeholder-gray-400 focus:border-kemenkum-blue focus:outline-none focus:ring-1 focus:ring-kemenkum-blue"
+          />
+          <p className="mt-1 text-xs text-gray-500">
+            Dapatkan kunci gratis di{" "}
+            <a
+              href="https://console.groq.com"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-kemenkum-blue hover:underline"
+            >
+              console.groq.com
+            </a>
+          </p>
+        </div>
 
         <div
           onDragEnter={handleDrag}

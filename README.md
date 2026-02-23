@@ -15,18 +15,13 @@ A simple web app to upload documents and get AI-generated summaries.
    npm install
    ```
 
-2. Set your Groq API key for the summarization feature:
-
-   - Copy `.env.local.example` to `.env.local`.
-   - Add your key: `GROQ_API_KEY=your-key` (get a free key at [console.groq.com](https://console.groq.com))
-
-3. Run the dev server:
+2. Run the dev server:
 
    ```bash
    npm run dev
    ```
 
-4. Open [http://localhost:3000](http://localhost:3000).
+3. Open [http://localhost:3000](http://localhost:3000) and enter your Groq API key in the form (get a free key at [console.groq.com](https://console.groq.com)). The key is cached for 1 hour in your browser.
 
 ## Build
 
@@ -37,7 +32,7 @@ npm start
 
 ## Deploy to Vercel
 
-Set `GROQ_API_KEY` in your Vercel project environment variables. No extra setup needed—just deploy:
+No environment variables needed—users enter their own Groq API key in the app:
 
 ```bash
 vercel

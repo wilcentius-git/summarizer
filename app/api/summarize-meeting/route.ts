@@ -230,22 +230,19 @@ function mergeParticipantsBySpeaker(participants: ParticipantShape[]): Participa
 
 export async function POST(request: NextRequest) {
   try {
-    const apiKey = process.env.GROQ_API_KEY;
-    if (!apiKey) {
-      return NextResponse.json(
-        {
-          error:
-            "Groq API key is not configured. Set GROQ_API_KEY in .env.local.",
-        },
-        { status: 500 }
-      );
-    }
-
     const formData = await request.formData();
+    const apiKey = (formData.get("groqApiKey") as string)?.trim();
     const file = formData.get("file");
     const leaderName = (formData.get("leaderName") as string)?.trim() ?? "";
     const leaderPosition =
       (formData.get("leaderPosition") as string)?.trim() ?? "";
+
+    if (!apiKey) {
+      return NextResponse.json(
+        { error: "Groq API key is required. Get one at https://console.groq.com" },
+        { status: 400 }
+      );
+    }
 
     if (!file || !(file instanceof Blob)) {
       return NextResponse.json(

@@ -16,16 +16,16 @@ import {
 
 export async function POST(request: NextRequest) {
   try {
-    const apiKey = process.env.GROQ_API_KEY;
+    const formData = await request.formData();
+    const apiKey = (formData.get("groqApiKey") as string)?.trim();
+    const file = formData.get("file");
+
     if (!apiKey) {
       return NextResponse.json(
-        { error: "Groq API key is not configured. Set GROQ_API_KEY in .env.local." },
-        { status: 500 }
+        { error: "Groq API key is required. Get one at https://console.groq.com" },
+        { status: 400 }
       );
     }
-
-    const formData = await request.formData();
-    const file = formData.get("file");
 
     if (!file || !(file instanceof Blob)) {
       return NextResponse.json(

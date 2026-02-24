@@ -552,7 +552,7 @@ export default function Home() {
           <h1 className="text-2xl font-bold text-kemenkum-blue">Kemenkum Summarizer</h1>
         </div>
         <p className="text-gray-600 mb-6">
-          Unggah dokumen (PDF, DOCX, TXT, RTF, ODT) untuk diringkas.
+          Unggah dokumen (PDF, DOCX, TXT, RTF, ODT, SRT) untuk diringkas.
         </p>
 
         <div className="w-full max-w-md mx-auto mb-6 text-left">
@@ -602,7 +602,7 @@ export default function Home() {
             </span>
           </label>
           <p className="text-sm text-gray-600">
-            atau jatuhkan file di sini (PDF, DOCX, TXT, RTF, ODT)
+            atau jatuhkan file di sini (PDF, DOCX, TXT, RTF, ODT, SRT)
           </p>
         </div>
 

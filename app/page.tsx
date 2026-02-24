@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 
 import kemenkumLogo from "@/assets/kemenkum_logo.png";
@@ -38,7 +38,7 @@ const MAX_FILE_SIZE_MB = 500;
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
 
 const ACCEPTED_FILE_TYPES =
-  ".pdf,.docx,.doc,.txt,.rtf,.odt,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/msword,text/plain,application/rtf,text/rtf,application/vnd.oasis.opendocument.text";
+  ".pdf,.docx,.doc,.txt,.rtf,.odt,.srt,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/msword,text/plain,application/rtf,text/rtf,application/vnd.oasis.opendocument.text,application/x-subrip";
 
 const SUPPORTED_MIME_TYPES = new Set([
   "application/pdf",
@@ -48,6 +48,7 @@ const SUPPORTED_MIME_TYPES = new Set([
   "application/rtf",
   "text/rtf",
   "application/vnd.oasis.opendocument.text",
+  "application/x-subrip",
 ]);
 
 const STANCE_STYLES: Record<string, string> = {
@@ -185,7 +186,7 @@ function isSupportedFile(file: File): boolean {
   // Fallback: check extension when MIME is generic
   if (file.type === "application/octet-stream" || !file.type) {
     const ext = file.name.toLowerCase().slice(file.name.lastIndexOf("."));
-    return [".pdf", ".docx", ".doc", ".txt", ".rtf", ".odt"].includes(ext);
+    return [".pdf", ".docx", ".doc", ".txt", ".rtf", ".odt", ".srt"].includes(ext);
   }
   return false;
 }
@@ -217,11 +218,23 @@ function saveGroqApiKeyToCache(key: string) {
   localStorage.setItem(GROQ_API_KEY_CACHE_KEY, JSON.stringify(cache));
 }
 
+/** Rough estimate: ~45s per 50KB, minimum 30s */
+function estimateSummarizeSeconds(fileSizeBytes: number): number {
+  return Math.max(30, Math.ceil(fileSizeBytes / 50000) * 45);
+}
+
 export default function Home() {
   const [groqApiKey, setGroqApiKey] = useState("");
   const [files, setFiles] = useState<FileItem[]>([]);
   const [dragActive, setDragActive] = useState(false);
   const [summarizeLoading, setSummarizeLoading] = useState<string | null>(null);
+  const [summarizeProgress, setSummarizeProgress] = useState<{
+    phase: string;
+    current: number;
+    total: number;
+  } | null>(null);
+  const [estimatedSeconds, setEstimatedSeconds] = useState<number | null>(null);
+  const summarizeAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     setGroqApiKey(loadCachedGroqApiKey());
@@ -257,7 +270,7 @@ export default function Home() {
       const file = newFiles[i];
       if (!isSupportedFile(file)) {
         setError(
-          "Unsupported file type. Supported: PDF, DOCX, DOC, TXT, RTF, ODT."
+          "Unsupported file type. Supported: PDF, DOCX, DOC, TXT, RTF, ODT, SRT."
         );
         continue;
       }
@@ -299,6 +312,10 @@ export default function Home() {
     [addFiles]
   );
 
+  const cancelSummarize = useCallback(() => {
+    summarizeAbortRef.current?.abort();
+  }, []);
+
   const handleSummarize = useCallback(
     async (item: FileItem) => {
       const key = groqApiKey.trim();
@@ -308,6 +325,12 @@ export default function Home() {
       }
       setError(null);
       setSummarizeLoading(item.id);
+      setSummarizeProgress({ phase: "extracting", current: 0, total: 1 });
+      setEstimatedSeconds(estimateSummarizeSeconds(item.size));
+
+      const controller = new AbortController();
+      summarizeAbortRef.current = controller;
+
       try {
         const formData = new FormData();
         formData.append("file", item.file);
@@ -315,17 +338,68 @@ export default function Home() {
         const res = await fetch("/api/summarize", {
           method: "POST",
           body: formData,
+          signal: controller.signal,
         });
-        if (!res.ok) {
+
+        if (!res.ok || !res.body) {
           const data = await res.json().catch(() => ({}));
           throw new Error(data.error || `Summarize failed: ${res.status}`);
         }
-        const data = await res.json();
-        setSummary({ fileId: item.id, fileName: item.name, text: data.summary ?? "" });
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() ?? "";
+
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            try {
+              const data = JSON.parse(line) as {
+                type?: string;
+                phase?: string;
+                current?: number;
+                total?: number;
+                text?: string;
+                message?: string;
+              };
+              if (data.type === "progress") {
+                setSummarizeProgress({
+                  phase: data.phase ?? "processing",
+                  current: data.current ?? 0,
+                  total: data.total ?? 1,
+                });
+              } else if (data.type === "summary") {
+                setSummary({
+                  fileId: item.id,
+                  fileName: item.name,
+                  text: data.text ?? "",
+                });
+              } else if (data.type === "error") {
+                throw new Error(data.message ?? "Summarization failed.");
+              }
+            } catch (parseErr) {
+              if (parseErr instanceof SyntaxError) continue;
+              throw parseErr;
+            }
+          }
+        }
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Summarize failed.");
+        if (err instanceof Error && err.name === "AbortError") {
+          setError("Dibatalkan.");
+        } else {
+          setError(err instanceof Error ? err.message : "Summarize failed.");
+        }
       } finally {
         setSummarizeLoading(null);
+        setSummarizeProgress(null);
+        setEstimatedSeconds(null);
+        summarizeAbortRef.current = null;
       }
     },
     [groqApiKey]
@@ -620,15 +694,57 @@ export default function Home() {
                     <p className="font-medium text-gray-900 truncate">{item.name}</p>
                     <p className="text-sm text-gray-500">{formatSize(item.size)}</p>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => handleSummarize(item)}
-                      disabled={!!summarizeLoading}
-                      className="px-4 py-2 rounded-lg bg-kemenkum-blue text-white text-sm font-medium hover:opacity-90 disabled:opacity-60"
-                    >
-                      {summarizeLoading === item.id ? "Summarizing…" : "Summarize"}
-                    </button>
+                  <div className="flex flex-col sm:flex-row items-center gap-2 w-full sm:w-auto">
+                    {summarizeLoading === item.id && summarizeProgress && (
+                      <div className="w-full sm:w-48 text-left">
+                        <p className="text-xs text-slate-600 mb-0.5">
+                          {summarizeProgress.phase === "extracting"
+                            ? "Mengekstrak teks…"
+                            : summarizeProgress.phase === "chunks"
+                              ? `Bagian ${summarizeProgress.current} dari ${summarizeProgress.total}`
+                              : summarizeProgress.phase === "merge"
+                                ? "Menggabungkan rangkuman…"
+                                : "Merangkum…"}
+                        </p>
+                        <div className="h-1.5 bg-slate-200 rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-kemenkum-blue transition-all duration-300"
+                            style={{
+                              width: `${Math.min(
+                                100,
+                                (summarizeProgress.current / Math.max(1, summarizeProgress.total)) * 100
+                              )}%`,
+                            }}
+                          />
+                        </div>
+                        {estimatedSeconds && (
+                          <p className="text-xs text-slate-500 mt-0.5">
+                            Estimasi: ~
+                            {estimatedSeconds < 60
+                              ? `${estimatedSeconds} detik`
+                              : `${Math.ceil(estimatedSeconds / 60)} menit`}
+                          </p>
+                        )}
+                      </div>
+                    )}
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleSummarize(item)}
+                        disabled={!!summarizeLoading}
+                        className="px-4 py-2 rounded-lg bg-kemenkum-blue text-white text-sm font-medium hover:opacity-90 disabled:opacity-60"
+                      >
+                        {summarizeLoading === item.id ? "Summarizing…" : "Summarize"}
+                      </button>
+                      {summarizeLoading === item.id && (
+                        <button
+                          type="button"
+                          onClick={cancelSummarize}
+                          className="px-4 py-2 rounded-lg border border-rose-300 text-rose-700 text-sm font-medium hover:bg-rose-50"
+                        >
+                          Batalkan
+                        </button>
+                      )}
                     <button
                       type="button"
                       onClick={() => openMeetingModal(item)}
@@ -640,10 +756,25 @@ export default function Home() {
                     <button
                       type="button"
                       onClick={() => removeFile(item.id)}
-                      className="px-3 py-2 rounded-lg border border-gray-300 text-gray-600 text-sm hover:bg-gray-50"
+                      className="p-2 rounded-lg border border-gray-300 text-gray-600 hover:border-red-400 hover:text-red-600 hover:bg-red-50"
+                      title="Remove"
                     >
-                      Remove
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        width="18"
+                        height="18"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2.5"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      >
+                        <line x1="18" y1="6" x2="6" y2="18" />
+                        <line x1="6" y1="6" x2="18" y2="18" />
+                      </svg>
                     </button>
+                    </div>
                   </div>
                 </li>
               ))}

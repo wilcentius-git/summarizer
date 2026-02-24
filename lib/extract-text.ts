@@ -1,6 +1,6 @@
 /**
  * Extracts plain text from various document formats.
- * Supports: PDF, DOCX, TXT, RTF, ODT
+ * Supports: PDF, DOCX, TXT, RTF, ODT, SRT
  */
 
 import { pdfPagesToImages, type PdfPageImage } from "@/lib/pdf-to-images";
@@ -15,9 +15,10 @@ export const SUPPORTED_MIME_TYPES = [
   "application/rtf",
   "text/rtf",
   "application/vnd.oasis.opendocument.text", // .odt
+  "application/x-subrip", // .srt
 ] as const;
 
-export const SUPPORTED_EXTENSIONS = [".pdf", ".docx", ".doc", ".txt", ".rtf", ".odt"] as const;
+export const SUPPORTED_EXTENSIONS = [".pdf", ".docx", ".doc", ".txt", ".rtf", ".odt", ".srt"] as const;
 
 export type SupportedMimeType = (typeof SUPPORTED_MIME_TYPES)[number];
 
@@ -37,6 +38,7 @@ const EXT_TO_MIME: Record<string, SupportedMimeType> = {
   ".txt": "text/plain",
   ".rtf": "application/rtf",
   ".odt": "application/vnd.oasis.opendocument.text",
+  ".srt": "application/x-subrip",
 };
 
 /** Resolve MIME type, inferring from filename when type is generic. */
@@ -106,6 +108,42 @@ async function extractTextFromPdf(buffer: Buffer): Promise<string> {
   return data?.text ?? "";
 }
 
+/** SRT timestamp pattern: 00:00:00,000 --> 00:00:00,000 */
+const SRT_TIMESTAMP = /^\d{2}:\d{2}:\d{2},\d{3}\s*-->\s*\d{2}:\d{2}:\d{2},\d{3}/;
+/** Speaker label in text: "Name: " or "Host: " etc. */
+const SPEAKER_PATTERN = /^([^:\n]+)\s*:\s*(.*)$/;
+
+function extractTextFromSrt(buffer: Buffer): string {
+  let raw = buffer.toString("utf-8").replace(/\ufeff/g, ""); // strip BOM
+  raw = raw.replace(/\r\n|\r/g, "\n").trim();
+
+  const blocks = raw.split(/\n\s*\n/);
+  const turns: string[] = [];
+
+  for (const block of blocks) {
+    const lines = block.split("\n").map((l) => l.trim()).filter(Boolean);
+    if (lines.length < 2) continue;
+
+    // First line: cue number; second: timestamp
+    let i = 0;
+    if (/^\d+$/.test(lines[0])) i = 1;
+    if (i < lines.length && SRT_TIMESTAMP.test(lines[i])) i += 1;
+
+    const textLines = lines.slice(i).filter((l) => !SRT_TIMESTAMP.test(l));
+    const text = textLines.join(" ").trim();
+    if (!text) continue;
+
+    const match = text.match(SPEAKER_PATTERN);
+    if (match && match[2]) {
+      turns.push(`${match[1].trim()}: ${match[2].trim()}`);
+    } else {
+      turns.push(`Speaker: ${text}`);
+    }
+  }
+
+  return turns.join("\n\n");
+}
+
 export type ExtractTextOptions = {
   /** For PDF: fallback to OCR when text extraction yields little. Requires apiKey for Groq Vision. */
   ocrFallback?: (images: PdfPageImage[]) => Promise<string>;
@@ -136,6 +174,9 @@ export async function extractText(
     case "application/vnd.oasis.opendocument.text":
       text = extractTextFromOdt(buffer);
       break;
+    case "application/x-subrip":
+      text = extractTextFromSrt(buffer);
+      break;
     case "application/pdf":
       text = await extractTextFromPdf(buffer);
       // PDF: optional OCR fallback for scanned documents
@@ -163,6 +204,8 @@ export async function extractText(
         text = await extractTextFromPdf(buffer);
       } else if (buffer.toString("utf-8", 0, 10).includes("{\\rtf")) {
         text = await extractTextFromRtf(buffer);
+      } else if (/^\d+\s*\n\d{2}:\d{2}:\d{2},\d{3}/m.test(buffer.toString("utf-8", 0, 200))) {
+        text = extractTextFromSrt(buffer);
       } else {
         text = extractTextFromTxt(buffer);
       }

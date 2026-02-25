@@ -36,9 +36,14 @@ type MeetingAnalysis = {
 
 const MAX_FILE_SIZE_MB = 500;
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
+const MAX_AUDIO_SIZE_MB = 25; // Groq free tier limit
+const MAX_AUDIO_SIZE_BYTES = MAX_AUDIO_SIZE_MB * 1024 * 1024;
 
 const ACCEPTED_FILE_TYPES =
-  ".pdf,.docx,.doc,.txt,.rtf,.odt,.srt,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/msword,text/plain,application/rtf,text/rtf,application/vnd.oasis.opendocument.text,application/x-subrip";
+  ".pdf,.docx,.doc,.txt,.rtf,.odt,.srt,.mp3,.wav,.m4a,.webm,.flac,.ogg,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/msword,text/plain,application/rtf,text/rtf,application/vnd.oasis.opendocument.text,application/x-subrip,audio/mpeg,audio/mp3,audio/mp4,audio/mpga,audio/wav,audio/webm,audio/flac,audio/ogg";
+
+const DOCUMENT_EXTENSIONS = [".pdf", ".docx", ".doc", ".txt", ".rtf", ".odt", ".srt"];
+const AUDIO_EXTENSIONS = [".mp3", ".mp4", ".mpeg", ".mpga", ".m4a", ".wav", ".webm", ".flac", ".ogg"];
 
 const SUPPORTED_MIME_TYPES = new Set([
   "application/pdf",
@@ -49,6 +54,14 @@ const SUPPORTED_MIME_TYPES = new Set([
   "text/rtf",
   "application/vnd.oasis.opendocument.text",
   "application/x-subrip",
+  "audio/mpeg",
+  "audio/mp3",
+  "audio/mp4",
+  "audio/mpga",
+  "audio/wav",
+  "audio/webm",
+  "audio/flac",
+  "audio/ogg",
 ]);
 
 const STANCE_STYLES: Record<string, string> = {
@@ -186,9 +199,15 @@ function isSupportedFile(file: File): boolean {
   // Fallback: check extension when MIME is generic
   if (file.type === "application/octet-stream" || !file.type) {
     const ext = file.name.toLowerCase().slice(file.name.lastIndexOf("."));
-    return [".pdf", ".docx", ".doc", ".txt", ".rtf", ".odt", ".srt"].includes(ext);
+    return [...DOCUMENT_EXTENSIONS, ...AUDIO_EXTENSIONS].includes(ext);
   }
   return false;
+}
+
+function isAudioFile(file: File): boolean {
+  if (["audio/mpeg", "audio/mp3", "audio/mp4", "audio/mpga", "audio/wav", "audio/webm", "audio/flac", "audio/ogg"].includes(file.type)) return true;
+  const ext = file.name.toLowerCase().slice(file.name.lastIndexOf("."));
+  return AUDIO_EXTENSIONS.includes(ext);
 }
 
 type FileItem = {
@@ -232,8 +251,12 @@ export default function Home() {
     phase: string;
     current: number;
     total: number;
+    message?: string;
+    step?: number;
+    stepLabel?: string;
   } | null>(null);
   const [estimatedSeconds, setEstimatedSeconds] = useState<number | null>(null);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const summarizeAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
@@ -243,6 +266,18 @@ export default function Home() {
   useEffect(() => {
     if (groqApiKey.trim()) saveGroqApiKeyToCache(groqApiKey);
   }, [groqApiKey]);
+
+  useEffect(() => {
+    if (!summarizeLoading) {
+      setElapsedSeconds(0);
+      return;
+    }
+    const start = Date.now();
+    const interval = setInterval(() => {
+      setElapsedSeconds(Math.floor((Date.now() - start) / 1000));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [summarizeLoading]);
   const [summary, setSummary] = useState<{
     fileId: string;
     fileName: string;
@@ -270,12 +305,14 @@ export default function Home() {
       const file = newFiles[i];
       if (!isSupportedFile(file)) {
         setError(
-          "Unsupported file type. Supported: PDF, DOCX, DOC, TXT, RTF, ODT, SRT."
+          "Unsupported file type. Supported: PDF, DOCX, DOC, TXT, RTF, ODT, SRT, MP3, WAV, M4A, WebM, FLAC, OGG."
         );
         continue;
       }
-      if (file.size > MAX_FILE_SIZE_BYTES) {
-        setError(`File ${file.name} exceeds ${MAX_FILE_SIZE_MB} MB.`);
+      const maxSize = isAudioFile(file) ? MAX_AUDIO_SIZE_BYTES : MAX_FILE_SIZE_BYTES;
+      const maxSizeMB = isAudioFile(file) ? MAX_AUDIO_SIZE_MB : MAX_FILE_SIZE_MB;
+      if (file.size > maxSize) {
+        setError(`File ${file.name} exceeds ${maxSizeMB} MB${isAudioFile(file) ? " (audio limit)" : ""}.`);
         continue;
       }
       added.push({
@@ -367,12 +404,17 @@ export default function Home() {
                 total?: number;
                 text?: string;
                 message?: string;
+                step?: number;
+                stepLabel?: string;
               };
               if (data.type === "progress") {
                 setSummarizeProgress({
                   phase: data.phase ?? "processing",
                   current: data.current ?? 0,
                   total: data.total ?? 1,
+                  message: data.message,
+                  step: data.step,
+                  stepLabel: data.stepLabel,
                 });
               } else if (data.type === "summary") {
                 setSummary({
@@ -543,7 +585,7 @@ export default function Home() {
   return (
     <main className="min-h-screen bg-kemenkum-blue py-8 px-4 flex justify-center items-center overflow-y-auto">
       <div
-        className={`w-full bg-white rounded-lg shadow-lg px-8 py-10 mx-auto ${
+        className={`w-full bg-white rounded-lg shadow-lg px-4 sm:px-8 py-10 mx-auto overflow-x-hidden ${
           meetingAnalysis ? "max-w-4xl" : "max-w-2xl"
         } text-center`}
       >
@@ -552,7 +594,7 @@ export default function Home() {
           <h1 className="text-2xl font-bold text-kemenkum-blue">Kemenkum Summarizer</h1>
         </div>
         <p className="text-gray-600 mb-6">
-          Unggah dokumen (PDF, DOCX, TXT, RTF, ODT, SRT) untuk diringkas.
+          Unggah dokumen (PDF, DOCX, TXT, RTF, ODT, SRT) atau audio (MP3, WAV, M4A) untuk diringkas.
         </p>
 
         <div className="w-full max-w-md mx-auto mb-6 text-left">
@@ -602,7 +644,7 @@ export default function Home() {
             </span>
           </label>
           <p className="text-sm text-gray-600">
-            atau jatuhkan file di sini (PDF, DOCX, TXT, RTF, ODT, SRT)
+            atau jatuhkan file di sini (PDF, DOCX, TXT, RTF, ODT, SRT, MP3, WAV, M4A)
           </p>
         </div>
 
@@ -682,81 +724,141 @@ export default function Home() {
         )}
 
         {files.length > 0 && (
-          <section className="mt-8 text-center">
+          <section className="mt-8 text-center min-w-0">
             <h2 className="text-base font-semibold text-kemenkum-blue mb-3">Files</h2>
-            <ul className="space-y-3">
+            <ul className="space-y-3 min-w-0">
               {files.map((item) => (
                 <li
                   key={item.id}
-                  className="flex flex-wrap items-center justify-center gap-3 p-3 rounded-lg border border-gray-200 bg-white shadow-sm"
+                  className="flex flex-col gap-3 p-3 rounded-lg border border-gray-200 bg-white shadow-sm overflow-hidden"
                 >
-                  <div className="flex-1 min-w-0 text-center">
-                    <p className="font-medium text-gray-900 truncate">{item.name}</p>
-                    <p className="text-sm text-gray-500">{formatSize(item.size)}</p>
+                  <div className="flex items-center justify-between gap-2 min-w-0">
+                    <div className="min-w-0 flex-1 text-center sm:text-left">
+                      <p className="font-medium text-gray-900 truncate">{item.name}</p>
+                      <p className="text-sm text-gray-500">{formatSize(item.size)}</p>
+                    </div>
                   </div>
-                  <div className="flex flex-col sm:flex-row items-center gap-2 w-full sm:w-auto">
-                    {summarizeLoading === item.id && summarizeProgress && (
-                      <div className="w-full sm:w-48 text-left">
-                        <p className="text-xs text-slate-600 mb-0.5">
-                          {summarizeProgress.phase === "extracting"
-                            ? "Mengekstrak teks…"
-                            : summarizeProgress.phase === "chunks"
-                              ? `Bagian ${summarizeProgress.current} dari ${summarizeProgress.total}`
-                              : summarizeProgress.phase === "merge"
-                                ? "Menggabungkan rangkuman…"
-                                : "Merangkum…"}
-                        </p>
-                        <div className="h-1.5 bg-slate-200 rounded-full overflow-hidden">
-                          <div
-                            className="h-full bg-kemenkum-blue transition-all duration-300"
-                            style={{
-                              width: `${Math.min(
-                                100,
-                                (summarizeProgress.current / Math.max(1, summarizeProgress.total)) * 100
-                              )}%`,
-                            }}
-                          />
-                        </div>
-                        {estimatedSeconds && (
-                          <p className="text-xs text-slate-500 mt-0.5">
-                            Estimasi: ~
-                            {estimatedSeconds < 60
-                              ? `${estimatedSeconds} detik`
-                              : `${Math.ceil(estimatedSeconds / 60)} menit`}
-                          </p>
+                  {summarizeLoading === item.id && summarizeProgress && (
+                    <div className="w-full min-w-0">
+                        {isAudioFile(item.file) ? (
+                          <div className="p-4 rounded-xl bg-gradient-to-br from-slate-50 to-blue-50 border border-slate-200">
+                            <div className="flex items-center gap-3 mb-3">
+                              <div className="w-10 h-10 rounded-full bg-kemenkum-blue/20 flex items-center justify-center animate-pulse">
+                                <span className="text-xl" aria-hidden>🎙️</span>
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className="font-medium text-slate-800 truncate">
+                                  {summarizeProgress.message ?? "Memproses audio…"}
+                                </p>
+                                <p className="text-xs text-slate-500">
+                                  Langkah {summarizeProgress.step ?? 1}/2 • {elapsedSeconds}s
+                                </p>
+                              </div>
+                            </div>
+                            <div className="flex gap-2 mb-2">
+                              {["Transkripsi", "Rangkuman"].map((label, i) => {
+                                const stepNum = i + 1;
+                                const isDone = (summarizeProgress.step ?? 1) > stepNum;
+                                const isActive = (summarizeProgress.step ?? 1) === stepNum;
+                                return (
+                                  <span
+                                    key={label}
+                                    className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${
+                                      isDone
+                                        ? "bg-emerald-100 text-emerald-800"
+                                        : isActive
+                                          ? "bg-kemenkum-blue/20 text-kemenkum-blue ring-1 ring-kemenkum-blue/30"
+                                          : "bg-slate-100 text-slate-500"
+                                    }`}
+                                  >
+                                    {stepNum}. {label}
+                                    {isDone && " ✓"}
+                                  </span>
+                                );
+                              })}
+                            </div>
+                            <div className="h-1.5 bg-slate-200 rounded-full overflow-hidden">
+                              <div
+                                className="h-full bg-kemenkum-blue transition-all duration-300"
+                                style={{
+                                  width: `${Math.min(
+                                    100,
+                                    (summarizeProgress.current / Math.max(1, summarizeProgress.total)) * 100
+                                  )}%`,
+                                }}
+                              />
+                            </div>
+                            <p className="text-xs text-slate-500 mt-2 italic">
+                              Groq Whisper biasanya selesai dalam 30–60 detik untuk audio 8 menit.
+                            </p>
+                          </div>
+                        ) : (
+                          <div className="text-left">
+                            <p className="text-xs text-slate-600 mb-0.5">
+                              {summarizeProgress.message ??
+                                (summarizeProgress.phase === "extracting"
+                                  ? "Mengekstrak teks…"
+                                  : summarizeProgress.phase === "transcribing"
+                                    ? "Mentranskripsi audio…"
+                                    : summarizeProgress.phase === "chunks"
+                                      ? `Bagian ${summarizeProgress.current} dari ${summarizeProgress.total}`
+                                      : summarizeProgress.phase === "merge"
+                                        ? "Menggabungkan rangkuman…"
+                                        : "Merangkum…")}
+                            </p>
+                            <div className="h-1.5 bg-slate-200 rounded-full overflow-hidden">
+                              <div
+                                className="h-full bg-kemenkum-blue transition-all duration-300"
+                                style={{
+                                  width: `${Math.min(
+                                    100,
+                                    (summarizeProgress.current / Math.max(1, summarizeProgress.total)) * 100
+                                  )}%`,
+                                }}
+                              />
+                            </div>
+                            {estimatedSeconds && (
+                              <p className="text-xs text-slate-500 mt-0.5">
+                                Estimasi: ~
+                                {estimatedSeconds < 60
+                                  ? `${estimatedSeconds} detik`
+                                  : `${Math.ceil(estimatedSeconds / 60)} menit`}
+                              </p>
+                            )}
+                          </div>
                         )}
-                      </div>
-                    )}
-                    <div className="flex items-center gap-2">
+                    </div>
+                  )}
+                  <div className="flex flex-wrap items-center gap-2 justify-end min-w-0">
+                    <button
+                      type="button"
+                      onClick={() => handleSummarize(item)}
+                      disabled={!!summarizeLoading}
+                      className="px-4 py-2 rounded-lg bg-kemenkum-blue text-white text-sm font-medium hover:opacity-90 disabled:opacity-60 whitespace-nowrap"
+                    >
+                      {summarizeLoading === item.id ? "Summarizing…" : "Summarize"}
+                    </button>
+                    {summarizeLoading === item.id && (
                       <button
                         type="button"
-                        onClick={() => handleSummarize(item)}
-                        disabled={!!summarizeLoading}
-                        className="px-4 py-2 rounded-lg bg-kemenkum-blue text-white text-sm font-medium hover:opacity-90 disabled:opacity-60"
+                        onClick={cancelSummarize}
+                        className="px-4 py-2 rounded-lg border border-rose-300 text-rose-700 text-sm font-medium hover:bg-rose-50 whitespace-nowrap"
                       >
-                        {summarizeLoading === item.id ? "Summarizing…" : "Summarize"}
+                        Batalkan
                       </button>
-                      {summarizeLoading === item.id && (
-                        <button
-                          type="button"
-                          onClick={cancelSummarize}
-                          className="px-4 py-2 rounded-lg border border-rose-300 text-rose-700 text-sm font-medium hover:bg-rose-50"
-                        >
-                          Batalkan
-                        </button>
-                      )}
+                    )}
                     <button
                       type="button"
                       onClick={() => openMeetingModal(item)}
                       disabled={!!meetingLoading}
-                      className="px-4 py-2 rounded-lg bg-kemenkum-blue text-white text-sm font-medium hover:opacity-90 disabled:opacity-60"
+                      className="px-4 py-2 rounded-lg bg-kemenkum-blue text-white text-sm font-medium hover:opacity-90 disabled:opacity-60 whitespace-nowrap"
                     >
                       {meetingLoading === item.id ? "Analyzing…" : "Summarize Meeting"}
                     </button>
                     <button
                       type="button"
                       onClick={() => removeFile(item.id)}
-                      className="p-2 rounded-lg border border-gray-300 text-gray-600 hover:border-red-400 hover:text-red-600 hover:bg-red-50"
+                      className="p-2 rounded-lg border border-gray-300 text-gray-600 hover:border-red-400 hover:text-red-600 hover:bg-red-50 flex-shrink-0"
                       title="Remove"
                     >
                       <svg
@@ -774,7 +876,6 @@ export default function Home() {
                         <line x1="6" y1="6" x2="18" y2="18" />
                       </svg>
                     </button>
-                    </div>
                   </div>
                 </li>
               ))}

@@ -4,9 +4,9 @@ A simple web app to upload documents and get AI-generated summaries.
 
 ## Features
 
-- **Upload documents** – Add files via file picker or drag and drop (max 500 MB per file). Supports: **PDF**, **DOCX**, **DOC**, **TXT**, **RTF**, **ODT**, **SRT**.
-- **Summarize** – Extract text and get a concise summary via Groq (Llama). Supports scanned PDFs via OCR and image understanding (Groq Vision).
-- **Summarize Meeting** – Analyze meeting transcripts to extract participant stances, alignment risks, and agreement confidence (Indonesian business conversations).
+- **Upload documents** – Add files via file picker or drag and drop (max 500 MB per file). Supports: **PDF**, **DOCX**, **DOC**, **TXT**, **RTF**, **ODT**, **SRT**, **MP3**, **WAV**, **M4A**, **WebM**, **FLAC**, **OGG**.
+- **Summarize** – Extract text and get a concise summary via Groq (Llama). Supports scanned PDFs via OCR (Groq Vision) and **audio transcription** via Groq Whisper (MP3, WAV, etc., max 25 MB for free tier).
+- **Summarize Meeting** – Analyze meeting transcripts or **recorded audio** to extract participant stances, alignment risks, and agreement confidence (Indonesian business conversations).
 
 ## Setup
 
@@ -46,7 +46,7 @@ Or connect your repo to [Vercel](https://vercel.com) for automatic deployments.
 - Next.js 14 (App Router), React 18, TypeScript
 - **pdf-parse** for PDF text extraction; **pdf-to-img** for PDF-to-image when text is missing (scanned PDFs)
 - **mammoth** for DOCX/DOC text extraction; **rtf-parser** for RTF; **adm-zip** for ODT
-- **Groq API** for summaries (text) and OCR/image understanding (Llama 4 Scout Vision)
+- **Groq API** for summaries (text), OCR/image understanding (Llama 4 Scout Vision), and **speech-to-text** (Whisper Large V3 Turbo)
 
 ## Architecture
 
@@ -59,6 +59,7 @@ Or connect your repo to [Vercel](https://vercel.com) for automatic deployments.
    - **ODT**: adm-zip + XML parsing
    - **SRT**: Custom parser (timestamps + speaker turns)
    - **PDF**: pdf-parse first; if text is empty or very short (< 50 chars), falls back to OCR
+   - **Audio (MP3, WAV, M4A, etc.)**: Groq Whisper (`whisper-large-v3-turbo`) transcribes to text, then summarization proceeds as usual
 
 2. **PDF OCR fallback** – For scanned PDFs:
    - `pdf-to-img` converts pages to PNG images (scale 3, max 20 pages)
@@ -76,7 +77,7 @@ Or connect your repo to [Vercel](https://vercel.com) for automatic deployments.
 
 ### Meeting Analysis Flow
 
-1. **Text extraction** – Same as above. Transcript truncated to 30,000 chars if longer.
+1. **Text extraction** – Same as above. For audio files, Groq Whisper transcribes first. Transcript truncated to 30,000 chars if longer.
 
 2. **Normalization** – `normalizeTranscript()` parses `Speaker: text` turns, strips Indonesian prefixes (Bpk., Ibu, Pak, Bu), merges continuation lines.
 
@@ -94,10 +95,11 @@ Or connect your repo to [Vercel](https://vercel.com) for automatic deployments.
 |--------------------|--------------------------------------------|
 | Text summarization | `llama-3.1-8b-instant`                     |
 | PDF OCR (Vision)   | `meta-llama/llama-4-scout-17b-16e-instruct`|
+| Audio transcription| `whisper-large-v3-turbo`                  |
 | Meeting analysis   | `llama-3.1-8b-instant`                     |
 
 ### Limits
 
-- Max file size: 500 MB
+- Max file size: 500 MB (documents), 25 MB (audio, Groq free tier)
 - Max transcript length (meeting): 30,000 chars
 - Max PDF pages for OCR: 20

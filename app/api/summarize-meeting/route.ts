@@ -13,6 +13,13 @@ import {
   MAX_FILE_SIZE_BYTES,
   MAX_TEXT_LENGTH,
 } from "@/lib/groq";
+import {
+  isAudioFileName,
+  isAudioMimeType,
+  MAX_AUDIO_SIZE_BYTES,
+  resolveAudioMimeType,
+  transcribeWithGroq,
+} from "@/lib/transcribe-audio";
 
 /**
  * Preprocesses and normalizes a meeting transcript for consistent parsing.
@@ -260,42 +267,67 @@ export async function POST(request: NextRequest) {
 
     const fileName = file instanceof File ? file.name : "file";
     const resolvedMime = resolveMimeType(file.type, fileName);
-    if (!isSupportedMimeType(resolvedMime) && !isSupportedFileName(fileName)) {
+    const resolvedAudioMime = resolveAudioMimeType(file.type, fileName);
+    const isAudio =
+      isAudioMimeType(resolvedAudioMime) || isAudioFileName(fileName);
+    const isDocument =
+      isSupportedMimeType(resolvedMime) || isSupportedFileName(fileName);
+
+    if (!isAudio && !isDocument) {
       return NextResponse.json(
         {
           error:
-            "Unsupported file type. Supported: PDF, DOCX, DOC, TXT, RTF, ODT.",
+            "Unsupported file type. Supported: PDF, DOCX, DOC, TXT, RTF, ODT, SRT, MP3, WAV, M4A, WebM, FLAC, OGG.",
         },
         { status: 400 }
       );
     }
 
-    if (file.size > MAX_FILE_SIZE_BYTES) {
+    const maxSize = isAudio ? MAX_AUDIO_SIZE_BYTES : MAX_FILE_SIZE_BYTES;
+    const maxSizeMB = maxSize / (1024 * 1024);
+    if (file.size > maxSize) {
       return NextResponse.json(
-        { error: `File exceeds ${MAX_FILE_SIZE_BYTES / (1024 * 1024)} MB.` },
+        {
+          error: `File exceeds ${maxSizeMB} MB${isAudio ? " (audio limit for free tier)" : ""}.`,
+        },
         { status: 400 }
       );
     }
 
     const buffer = Buffer.from(await file.arrayBuffer());
 
-    const ocrFallback =
-      resolvedMime === "application/pdf" ? createOcrFallback(apiKey) : undefined;
-
-    let text = await extractText(buffer, resolvedMime, {
-      ocrFallback,
-    });
+    let text: string;
+    if (isAudio) {
+      text = await transcribeWithGroq(buffer, apiKey, {
+        language: "id",
+        fileName,
+      });
+    } else {
+      const ocrFallback =
+        resolvedMime === "application/pdf" ? createOcrFallback(apiKey) : undefined;
+      text = await extractText(buffer, resolvedMime, {
+        ocrFallback,
+      });
+    }
 
     if (!text.trim()) {
       return NextResponse.json(
         {
-          error:
-            resolvedMime === "application/pdf"
+          error: isAudio
+            ? "No speech could be transcribed from the audio. Try a different file."
+            : resolvedMime === "application/pdf"
               ? "No text could be extracted. The PDF may be scanned—OCR failed. Try a different file."
               : "No text could be extracted from the document.",
         },
         { status: 400 }
       );
+    }
+
+    // Whisper returns continuous text without speaker labels; wrap as single speaker for meeting analysis
+    const speakerPattern = /^[^:\n]+\s*:\s*.+$/;
+    const hasSpeakerTurns = text.split("\n").some((line) => speakerPattern.test(line.trim()));
+    if (!hasSpeakerTurns) {
+      text = `Speaker: ${text}`;
     }
 
     if (text.length > MAX_TEXT_LENGTH) {

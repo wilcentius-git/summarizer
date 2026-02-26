@@ -90,9 +90,11 @@ const RISK_LABELS: Record<string, string> = {
 function MeetingAnalysisDisplay({
   fileName,
   data,
+  onExportPdf,
 }: {
   fileName: string;
   data: MeetingAnalysis;
+  onExportPdf?: () => void;
 }) {
   const { leader, participants } = data;
   const list = participants ?? [];
@@ -100,12 +102,25 @@ function MeetingAnalysisDisplay({
   return (
     <section className="mt-8 text-left">
       <div className="mb-6">
-        <h2 className="text-lg font-semibold text-kemenkum-blue">Analisis Rapat</h2>
-        <p className="text-sm text-slate-500 mt-1">{fileName}</p>
-        <p className="text-sm text-slate-600 mt-1">
-          Pemimpin: <strong>{leader.name}</strong>
-          {leader.position && ` — ${leader.position}`}
-        </p>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h2 className="text-lg font-semibold text-kemenkum-blue">Analisis Rapat</h2>
+            <p className="text-sm text-slate-500 mt-1">{fileName}</p>
+            <p className="text-sm text-slate-600 mt-1">
+              Pemimpin: <strong>{leader.name}</strong>
+              {leader.position && ` — ${leader.position}`}
+            </p>
+          </div>
+          {onExportPdf && (
+            <button
+              type="button"
+              onClick={onExportPdf}
+              className="px-3 py-1.5 rounded bg-kemenkum-yellow text-kemenkum-blue text-sm font-medium hover:opacity-90 flex-shrink-0"
+            >
+              Export to PDF
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="space-y-4">
@@ -242,6 +257,12 @@ function estimateSummarizeSeconds(fileSizeBytes: number): number {
   return Math.max(30, Math.ceil(fileSizeBytes / 50000) * 45);
 }
 
+/** Rough estimate for Groq Whisper + summarization: ~30–60s for 8 min audio (~8MB). ~7s per MB. */
+function estimateAudioTranscribeSeconds(fileSizeBytes: number): number {
+  const mb = fileSizeBytes / (1024 * 1024);
+  return Math.max(30, Math.ceil(mb) * 7);
+}
+
 export default function Home() {
   const [groqApiKey, setGroqApiKey] = useState("");
   const [files, setFiles] = useState<FileItem[]>([]);
@@ -363,7 +384,11 @@ export default function Home() {
       setError(null);
       setSummarizeLoading(item.id);
       setSummarizeProgress({ phase: "extracting", current: 0, total: 1 });
-      setEstimatedSeconds(estimateSummarizeSeconds(item.size));
+      setEstimatedSeconds(
+        isAudioFile(item.file)
+          ? estimateAudioTranscribeSeconds(item.size)
+          : estimateSummarizeSeconds(item.size)
+      );
 
       const controller = new AbortController();
       summarizeAbortRef.current = controller;
@@ -463,10 +488,12 @@ export default function Home() {
     const lineHeight = 6;
     let y = margin;
 
-    const dateStr = new Date().toLocaleDateString("id-ID", {
+    const dateStr = new Date().toLocaleString("id-ID", {
       day: "numeric",
       month: "long",
       year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
     });
 
     pdf.setFontSize(10);
@@ -511,6 +538,141 @@ export default function Home() {
     const baseName = (summary.fileName ?? "document").replace(/\.[^/.]+$/, "");
     pdf.save(`${baseName}_summary.pdf`);
   }, [summary?.text, summary?.fileName]);
+
+  const exportMeetingToPdf = useCallback(async () => {
+    if (!meetingAnalysis?.data) return;
+    const { jsPDF } = await import("jspdf");
+    const pdf = new jsPDF({ unit: "mm", format: "a4", orientation: "portrait" });
+    const margin = 15;
+    const pageW = pdf.internal.pageSize.getWidth();
+    const pageH = pdf.internal.pageSize.getHeight();
+    const maxW = pageW - 2 * margin;
+    const lineHeight = 5;
+    let y = margin;
+
+    const addPageIfNeeded = (needed: number) => {
+      if (y + needed > pageH - margin) {
+        pdf.addPage();
+        y = margin;
+      }
+    };
+
+    const wrapText = (text: string, maxWidth: number) =>
+      pdf.splitTextToSize(text, maxWidth);
+
+    // Header: Analisis Rapat
+    pdf.setFontSize(14);
+    pdf.setTextColor(30, 64, 175); // kemenkum-blue
+    pdf.text("Analisis Rapat", margin, y);
+    y += lineHeight * 1.5;
+
+    pdf.setFontSize(10);
+    pdf.setTextColor(100, 116, 139); // slate-500
+    pdf.text(meetingAnalysis.fileName ?? "—", margin, y);
+    y += lineHeight;
+    const dateStr = new Date().toLocaleString("id-ID", {
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+    pdf.text(`Tanggal dibuat: ${dateStr}`, margin, y);
+    y += lineHeight;
+
+    pdf.setTextColor(71, 85, 105); // slate-600
+    const leaderText = `Pemimpin: ${meetingAnalysis.data.leader.name}${meetingAnalysis.data.leader.position ? ` — ${meetingAnalysis.data.leader.position}` : ""}`;
+    pdf.text(leaderText, margin, y);
+    y += lineHeight * 1.5;
+
+    const list = meetingAnalysis.data.participants ?? [];
+    for (let i = 0; i < list.length; i++) {
+      const p = list[i];
+      addPageIfNeeded(lineHeight * 15);
+
+      // Participant card header
+      pdf.setDrawColor(226, 232, 240); // slate-200
+      pdf.setLineWidth(0.3);
+      pdf.rect(margin, y - 2, pageW - 2 * margin, 1, "S");
+      y += 4;
+
+      pdf.setFontSize(12);
+      pdf.setTextColor(30, 64, 175);
+      pdf.setFont("helvetica", "bold");
+      pdf.text(p.speaker, margin, y);
+      y += lineHeight;
+
+      if (p.agreement_confidence != null) {
+        pdf.setFont("helvetica", "normal");
+        pdf.setFontSize(9);
+        const conf = p.agreement_confidence;
+        if (conf <= 2) pdf.setTextColor(190, 18, 60);
+        else if (conf <= 3) pdf.setTextColor(180, 83, 9);
+        else pdf.setTextColor(4, 120, 87);
+        pdf.text(`Kesepakatan: ${conf}/5`, margin, y);
+        pdf.setTextColor(0, 0, 0);
+        y += lineHeight;
+      }
+
+      if (p.points?.length) {
+        y += 2;
+        pdf.setFontSize(9);
+        pdf.setTextColor(100, 116, 139);
+        pdf.text("POSISI PER TOPIK", margin, y);
+        y += lineHeight;
+        pdf.setFont("helvetica", "normal");
+        for (const pt of p.points) {
+          const stanceLabel = STANCE_LABELS[pt.stance] ?? pt.stance;
+          const line = `[${stanceLabel}] ${pt.topic}${pt.evidence?.[0] ? ` — "${pt.evidence[0]}"` : ""}`;
+          const wrapped = wrapText(line, maxW - 5);
+          addPageIfNeeded(wrapped.length * lineHeight);
+          pdf.setTextColor(51, 65, 85);
+          pdf.text(wrapped, margin + 3, y);
+          y += wrapped.length * lineHeight;
+        }
+        y += 2;
+      }
+
+      if (p.risks?.length) {
+        pdf.setFontSize(9);
+        pdf.setTextColor(180, 83, 9); // amber-700
+        pdf.text("INDIKATOR RISIKO ALIGNMENT", margin, y);
+        y += lineHeight;
+        pdf.setFont("helvetica", "normal");
+        for (const r of p.risks) {
+          const riskLabel = RISK_LABELS[r.type] ?? r.type;
+          const evStr = r.evidence?.length ? ` — ${r.evidence.map((e) => `"${e}"`).join(", ")}` : "";
+          const line = `${riskLabel} ${(r.score * 100).toFixed(0)}%${evStr}`;
+          const wrapped = wrapText(line, maxW - 5);
+          addPageIfNeeded(wrapped.length * lineHeight);
+          pdf.setTextColor(51, 65, 85);
+          pdf.text(wrapped, margin + 3, y);
+          y += wrapped.length * lineHeight;
+        }
+        y += 2;
+      }
+
+      if (p.summary) {
+        pdf.setDrawColor(241, 245, 249);
+        pdf.setLineWidth(0.2);
+        pdf.line(margin, y, pageW - margin, y);
+        y += lineHeight;
+        pdf.setFontSize(10);
+        pdf.setTextColor(71, 85, 105);
+        pdf.setFont("helvetica", "italic");
+        const wrapped = wrapText(p.summary, maxW);
+        addPageIfNeeded(wrapped.length * lineHeight);
+        pdf.text(wrapped, margin, y);
+        y += wrapped.length * lineHeight;
+        pdf.setFont("helvetica", "normal");
+      }
+
+      y += lineHeight * 1.5;
+    }
+
+    const baseName = (meetingAnalysis.fileName ?? "meeting").replace(/\.[^/.]+$/, "");
+    pdf.save(`${baseName}_analisis_rapat.pdf`);
+  }, [meetingAnalysis]);
 
   const openMeetingModal = useCallback((item: FileItem) => {
     setError(null);
@@ -788,9 +950,14 @@ export default function Home() {
                                 }}
                               />
                             </div>
-                            <p className="text-xs text-slate-500 mt-2 italic">
-                              Groq Whisper biasanya selesai dalam 30–60 detik untuk audio 8 menit.
-                            </p>
+                            {estimatedSeconds != null && (
+                              <p className="text-xs text-slate-500 mt-2 italic">
+                                Estimasi: ~
+                                {estimatedSeconds < 60
+                                  ? `${estimatedSeconds} detik`
+                                  : `${Math.ceil(estimatedSeconds / 60)} menit`}
+                              </p>
+                            )}
                           </div>
                         ) : (
                           <div className="text-left">
@@ -915,6 +1082,7 @@ export default function Home() {
           <MeetingAnalysisDisplay
             fileName={meetingAnalysis.fileName}
             data={meetingAnalysis.data}
+            onExportPdf={exportMeetingToPdf}
           />
         )}
       </div>

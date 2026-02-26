@@ -21,21 +21,23 @@ import {
   transcribeWithGroq,
 } from "@/lib/transcribe-audio";
 
+type TranscriptTurn = { speaker: string; text: string };
+
 /**
  * Preprocesses and normalizes a meeting transcript for consistent parsing.
  * - Normalizes whitespace and line endings
  * - Parses "Speaker: text" turns (handles "Name:", "Name :", "Bpk. Name:", etc.)
  * - Strips common Indonesian prefixes (Bpk., Bapak, Ibu, Pak, Bu) for canonical speaker names
- * - Ensures consistent "Speaker: text" format with clear turn separation
+ * - Returns turns array and transcript with turn numbers for clearer attribution
  */
-function normalizeTranscript(raw: string): string {
+function normalizeTranscript(raw: string): { transcript: string; turns: TranscriptTurn[] } {
   let text = raw
     .replace(/\r\n|\r/g, "\n")
     .replace(/[ \t]+/g, " ")
     .trim();
 
   const lines = text.split("\n");
-  const turns: Array<{ speaker: string; text: string }> = [];
+  const turns: TranscriptTurn[] = [];
   const speakerPattern = /^([^:\n]+)\s*:\s*(.*)$/;
 
   for (let i = 0; i < lines.length; i++) {
@@ -66,7 +68,124 @@ function normalizeTranscript(raw: string): string {
     }
   }
 
-  return turns.map((t) => `${t.speaker}: ${t.text}`).join("\n\n");
+  const transcript = turns
+    .map((t, i) => `[${i + 1}] ${t.speaker}: ${t.text}`)
+    .join("\n\n");
+  return { transcript, turns };
+}
+
+function normalizeSpeakerName(name: string): string {
+  return (name ?? "")
+    .replace(/^(Bpk\.?|Bapak|Pak|Ibu|Bu)\s+/i, "")
+    .replace(/\bmentri\b/gi, "menteri")
+    .trim()
+    .toLowerCase() || "(unknown)";
+}
+
+/**
+ * Finds which speaker said the given quote by searching transcript turns.
+ * Uses substring match (quote in turn or turn in quote) for flexibility.
+ */
+function findSpeakerForQuote(quote: string, turns: TranscriptTurn[]): string | null {
+  const q = quote.trim().replace(/\s+/g, " ");
+  if (!q || q.length < 3) return null;
+  const qLower = q.toLowerCase();
+  for (const t of turns) {
+    const text = t.text.trim().replace(/\s+/g, " ");
+    if (text.length >= 3) {
+      const textLower = text.toLowerCase();
+      if (textLower.includes(qLower) || qLower.includes(textLower)) {
+        return t.speaker;
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Validates and fixes speaker attribution: moves points/risks to the correct speaker
+ * when evidence quotes belong to someone else. Removes evidence that cannot be found.
+ */
+function fixSpeakerAttribution(
+  participants: ParticipantShape[],
+  turns: TranscriptTurn[]
+): ParticipantShape[] {
+  const bySpeaker = new Map<string, ParticipantShape>();
+  for (const p of participants) {
+    const key = normalizeSpeakerName(p.speaker);
+    bySpeaker.set(key, {
+      speaker: p.speaker,
+      agreement_confidence: p.agreement_confidence,
+      points: [...(p.points ?? [])],
+      risks: [...(p.risks ?? [])],
+      summary: p.summary,
+    });
+  }
+
+  const correctedPoints: Array<{ speakerKey: string; point: NonNullable<ParticipantShape["points"]>[0] }> = [];
+  const correctedRisks: Array<{ speakerKey: string; risk: NonNullable<ParticipantShape["risks"]>[0] }> = [];
+
+  for (const [speakerKey, participant] of bySpeaker) {
+    for (const point of participant.points ?? []) {
+      const evidence = point.evidence ?? [];
+      if (evidence.length === 0) {
+        correctedPoints.push({ speakerKey, point });
+        continue;
+      }
+      const speakerForEvidence = evidence.map((q) => findSpeakerForQuote(q, turns));
+      const validEvidence = evidence.filter((_, i) => speakerForEvidence[i] != null);
+      const correctSpeakerKeys = [...new Set(speakerForEvidence.filter(Boolean).map((s) => normalizeSpeakerName(s!)))];
+      if (validEvidence.length === 0) continue;
+      if (correctSpeakerKeys.length > 1) continue;
+      const targetKey = correctSpeakerKeys[0];
+      if (bySpeaker.has(targetKey)) {
+        correctedPoints.push({
+          speakerKey: targetKey,
+          point: { ...point, evidence: validEvidence },
+        });
+      }
+    }
+    for (const risk of participant.risks ?? []) {
+      const evidence = risk.evidence ?? [];
+      if (evidence.length === 0) {
+        correctedRisks.push({ speakerKey, risk });
+        continue;
+      }
+      const speakerForEvidence = evidence.map((q) => findSpeakerForQuote(q, turns));
+      const validEvidence = evidence.filter((_, i) => speakerForEvidence[i] != null);
+      const correctSpeakerKeys = [...new Set(speakerForEvidence.filter(Boolean).map((s) => normalizeSpeakerName(s!)))];
+      if (validEvidence.length === 0) continue;
+      if (correctSpeakerKeys.length > 1) continue;
+      const targetKey = correctSpeakerKeys[0];
+      if (bySpeaker.has(targetKey)) {
+        correctedRisks.push({
+          speakerKey: targetKey,
+          risk: { ...risk, evidence: validEvidence },
+        });
+      }
+    }
+  }
+
+  for (const p of bySpeaker.values()) {
+    p.points = [];
+    p.risks = [];
+  }
+  for (const { speakerKey, point } of correctedPoints) {
+    const p = bySpeaker.get(speakerKey);
+    if (p) p.points = [...(p.points ?? []), point];
+  }
+  for (const { speakerKey, risk } of correctedRisks) {
+    const p = bySpeaker.get(speakerKey);
+    if (p) p.risks = [...(p.risks ?? []), risk];
+  }
+
+  for (const m of bySpeaker.values()) {
+    const derived = deriveAgreementFromPoints(m.points);
+    if (derived != null && m.points && m.points.length > 0) {
+      m.agreement_confidence = derived;
+    }
+  }
+  return Array.from(bySpeaker.values());
 }
 
 const SYSTEM_PROMPT = `You are a meeting analysis engine for Indonesian business conversations.
@@ -89,7 +208,7 @@ function buildUserPrompt(
 - Leader: ${leaderName}
 - Leader position: ${leaderPosition}
 - Language: Indonesian
-- Format: "Speaker: text"
+- Format: "[turnNumber] Speaker: text" — each turn is numbered. Use turn numbers to verify speaker attribution.
 
 Task: For each participant (EXCLUDE the leader "${leaderName}"), extract topic-level stances and alignment risks.
 
@@ -139,9 +258,9 @@ MUST be consistent with points: if most/all points are "oppose" → 1–2; if mo
 Never output 4/5 when points show opposition. Never output 1/2 when points show support.
 
 CRITICAL — Speaker attribution:
-- Each participant's points and risks must use ONLY quotes from that speaker's own turns. Before adding any evidence, verify: does this exact quote appear in the transcript under THIS speaker's name?
-- WRONG: Putting Budi's quote under Rina's entry, or Rina's quote under Budi's. RIGHT: Only use quotes from the speaker's own "Name: text" blocks.
-- Process one speaker at a time: list their turns from the transcript, then extract points/risks from those turns only. Do not mix speakers.
+- Each participant's points and risks must use ONLY quotes from that speaker's own turns. The transcript has turn numbers [1], [2], etc. Verify: does this exact quote appear in a turn with THIS speaker's name?
+- WRONG: Putting Budi's quote under Rina's entry, or Rina's quote under Budi's. RIGHT: Only use quotes from the speaker's own "[N] Name: text" blocks.
+- Process one speaker at a time: list their turn numbers and text, then extract points/risks from those turns only. Do not mix speakers.
 
 Rules:
 - Exclude leader from participants.
@@ -178,6 +297,14 @@ function parseJsonResponse(raw: string): unknown {
   const codeBlockMatch = cleaned.match(/```(?:json)?\s*([\s\S]*?)```/);
   if (codeBlockMatch) {
     cleaned = codeBlockMatch[1].trim();
+  }
+  const braceMatch = cleaned.match(/\{[\s\S]*\}/);
+  if (braceMatch) {
+    cleaned = braceMatch[0];
+  }
+  cleaned = cleaned.replace(/,(\s*[}\]])/g, "$1");
+  if (!cleaned) {
+    throw new Error("Empty JSON response");
   }
   return JSON.parse(cleaned) as unknown;
 }
@@ -335,12 +462,12 @@ export async function POST(request: NextRequest) {
         text.slice(0, MAX_TEXT_LENGTH) + "\n\n[Text truncated for length.]";
     }
 
-    text = normalizeTranscript(text);
+    const { transcript, turns } = normalizeTranscript(text);
 
     const userPrompt = buildUserPrompt(
       leaderName,
       leaderPosition || "(tidak disebutkan)",
-      text
+      transcript
     );
 
     const groqResponse = await fetch(GROQ_API_URL, {
@@ -356,7 +483,8 @@ export async function POST(request: NextRequest) {
           { role: "user", content: userPrompt },
         ],
         max_tokens: 8192,
-        temperature: 0.2,
+        temperature: 0,
+        response_format: { type: "json_object" },
       }),
     });
 
@@ -379,6 +507,7 @@ export async function POST(request: NextRequest) {
       analysis = parseJsonResponse(rawContent);
     } catch (parseErr) {
       console.error("Meeting analysis JSON parse error:", parseErr);
+      console.error("Raw content (first 800 chars):", rawContent.slice(0, 800));
       return NextResponse.json(
         {
           error:
@@ -401,6 +530,10 @@ export async function POST(request: NextRequest) {
 
     const raw = analysis as { participants: ParticipantShape[] };
     raw.participants = mergeParticipantsBySpeaker(raw.participants);
+    raw.participants = fixSpeakerAttribution(raw.participants, turns);
+    raw.participants = raw.participants.filter(
+      (p) => normalizeSpeakerName(p.speaker) !== normalizeSpeakerName(leaderName)
+    );
 
     return NextResponse.json({ analysis });   
   } catch (err) {

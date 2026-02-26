@@ -31,6 +31,42 @@ npm run build
 npm start
 ```
 
+## Docker
+
+**Build:**
+
+```bash
+docker build -t summarizer .
+```
+
+**Run (foreground – use Ctrl+C to stop):**
+
+```bash
+docker run -p 3000:3000 summarizer
+```
+
+**Run (background):**
+
+```bash
+docker run -d -p 3000:3000 --name summarizer summarizer
+```
+
+**Stop (when running in background):**
+
+```bash
+docker stop summarizer
+```
+
+**Or with Docker Compose:**
+
+```bash
+docker compose up --build    # Ctrl+C to stop
+# or
+docker compose up -d --build # background; use: docker compose down
+```
+
+Open [http://localhost:3000](http://localhost:3000). Users enter their Groq API key in the app. To pass `GROQ_API_KEY` via env, create `.env.local` and uncomment the `env_file` section in `docker-compose.yml`.
+
 ## Deploy to Vercel
 
 No environment variables needed—users enter their own Groq API key in the app:

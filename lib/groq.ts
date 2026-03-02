@@ -116,6 +116,9 @@ const SUMMARIZE_PROMPT = `Anda adalah asisten yang merangkum dokumen. Aturan:
 - Istilah teknis (misalnya: API, PDF, database, framework, dll.) tetap gunakan istilah aslinya, jangan diterjemahkan.
 - Awali rangkuman dengan kalimat deskripsi dokumen, contoh: "Dokumen ini berisi hal tentang [topik utama dokumen]."
 - Setelah itu, lanjutkan dengan poin-poin penting secara ringkas.
+- Variasikan struktur kalimat. Hindari pengulangan kata "juga" di awal kalimat berturut-turut.
+- Untuk dokumen rapat/notula: sertakan nama orang untuk usulan dan pertanyaan penting. Pisahkan tindak lanjut (koordinasi, verifikasi, analisis yang diminta) jika ada.
+- Untuk dokumen teknis/rapat IT: sertakan poin teknis penting seperti fitur spesifik (SSL VPN, FortiClient, FortiGuard), mode operasi (Proxy, Static URL, Full Flow, Quick Flow), dan batasan/opsi (misalnya: tanpa lisensi, satu sertifikat per perangkat).
 - PENTING: Gunakan konten dari SEMUA halaman dokumen (Halaman 1 sampai terakhir). Jangan hanya merangkum halaman terakhir - sertakan poin penting dari halaman awal dan tengah.
 - Jangan hanya menyatakan kesimpulan abstrak. Berikan contoh konkret dari dokumen yang mendukung kesimpulan itu.
 - Jaga struktur dan poin kunci. Tanpa pembukaan lain, langsung rangkuman saja.
@@ -124,13 +127,13 @@ Dokumen:
 
 `;
 
-const SUMMARIZE_CHUNK_PROMPT = `Rangkum bagian berikut secara ringkas dalam Bahasa Indonesia. Fokus pada poin-poin penting. Tanpa pembukaan, langsung rangkuman saja.
+const SUMMARIZE_CHUNK_PROMPT = `Rangkum bagian berikut secara ringkas dalam Bahasa Indonesia. Fokus pada poin-poin penting. Variasikan struktur kalimat; hindari pengulangan kata "juga". Tanpa pembukaan, langsung rangkuman saja.
 
 Bagian:
 
 `;
 
-const SUMMARIZE_MERGE_PROMPT = `Gabungkan rangkuman berikut menjadi satu rangkuman koheren dalam Bahasa Indonesia. Awali dengan kalimat deskripsi singkat tentang topik utama, lalu poin-poin penting. Hindari pengulangan. Tanpa pembukaan lain, langsung rangkuman saja.
+const SUMMARIZE_MERGE_PROMPT = `Gabungkan rangkuman berikut menjadi satu rangkuman koheren dalam Bahasa Indonesia. Awali dengan kalimat deskripsi singkat tentang topik utama, lalu poin-poin penting. Hindari pengulangan. Variasikan kata penghubung (selain itu, selanjutnya, di samping itu, dll.) - jangan gunakan "juga" berulang kali. Tanpa pembukaan lain, langsung rangkuman saja.
 
 Rangkuman per bagian:
 

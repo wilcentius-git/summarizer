@@ -8,6 +8,7 @@ import {
 } from "@/lib/extract-text";
 import {
   createOcrFallback,
+  deduplicateParagraphs,
   GROQ_API_URL,
   GROQ_MODEL,
   MAX_FILE_SIZE_BYTES,
@@ -448,6 +449,10 @@ export async function POST(request: NextRequest) {
         },
         { status: 400 }
       );
+    }
+
+    if (isAudio) {
+      text = deduplicateParagraphs(text);
     }
 
     // Whisper returns continuous text without speaker labels; wrap as single speaker for meeting analysis

@@ -8,6 +8,7 @@ import {
 } from "@/lib/extract-text";
 import {
   createOcrFallback,
+  deduplicateParagraphs,
   MAX_FILE_SIZE_BYTES,
   sleep,
   SUMMARIZE_CHUNK_DELAY_MS,
@@ -132,6 +133,20 @@ export async function POST(request: NextRequest) {
           text = await transcribeWithGroq(buffer, apiKey, {
             language: "id",
             fileName,
+            onChunkProgress: (current, total) => {
+              send({
+                type: "progress",
+                phase: "transcribing",
+                current,
+                total,
+                message:
+                  total > 1
+                  ? `Transkripsi bagian ${current} dari ${total}…`
+                  : "Mengirim ke Groq Whisper untuk transkripsi…",
+                step: 1,
+                stepLabel: "Transkripsi",
+              });
+            },
           });
         } else {
           const ocrFallback =
@@ -150,6 +165,10 @@ export async function POST(request: NextRequest) {
           send({ type: "error", message: msg });
           controller.close();
           return;
+        }
+
+        if (isAudio) {
+          text = deduplicateParagraphs(text);
         }
 
         let summary: string;

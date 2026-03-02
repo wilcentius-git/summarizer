@@ -17,6 +17,23 @@ export const GROQ_IMAGES_PER_REQUEST = 1;
  * Splits text into chunks at natural boundaries (paragraph, line, sentence).
  * Each chunk stays under maxSize to fit within API token limits.
  */
+/**
+ * Removes consecutive duplicate paragraphs from text (e.g. from repetitive transcripts).
+ * Keeps first occurrence of each unique paragraph.
+ */
+export function deduplicateParagraphs(text: string): string {
+  const paragraphs = text.split(/\n\n+/).map((p) => p.trim()).filter(Boolean);
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const p of paragraphs) {
+    const key = p.toLowerCase().replace(/\s+/g, " ").slice(0, 200);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(p);
+  }
+  return result.join("\n\n");
+}
+
 export function splitIntoChunks(text: string, maxSize: number): string[] {
   if (text.length <= maxSize) return [text.trim()];
   const chunks: string[] = [];
@@ -122,18 +139,26 @@ const SUMMARIZE_PROMPT = `Anda adalah asisten yang merangkum dokumen. Aturan:
 - PENTING: Gunakan konten dari SEMUA halaman dokumen (Halaman 1 sampai terakhir). Jangan hanya merangkum halaman terakhir - sertakan poin penting dari halaman awal dan tengah.
 - Jangan hanya menyatakan kesimpulan abstrak. Berikan contoh konkret dari dokumen yang mendukung kesimpulan itu.
 - Jaga struktur dan poin kunci. Tanpa pembukaan lain, langsung rangkuman saja.
+- Pastikan rangkuman selesai lengkap; jangan potong di tengah kalimat.
 
 Dokumen:
 
 `;
 
-const SUMMARIZE_CHUNK_PROMPT = `Rangkum bagian berikut secara ringkas dalam Bahasa Indonesia. Fokus pada poin-poin penting. Variasikan struktur kalimat; hindari pengulangan kata "juga". Tanpa pembukaan, langsung rangkuman saja.
+const SUMMARIZE_CHUNK_PROMPT = `Rangkum bagian berikut secara ringkas dalam Bahasa Indonesia. Fokus pada poin-poin penting dan UNIK. Jangan ulangi frasa atau poin yang sama. Variasikan struktur kalimat; hindari pengulangan kata "juga". Tanpa pembukaan, langsung rangkuman saja. Pastikan kalimat terakhir selesai lengkap.
 
 Bagian:
 
 `;
 
-const SUMMARIZE_MERGE_PROMPT = `Gabungkan rangkuman berikut menjadi satu rangkuman koheren dalam Bahasa Indonesia. Awali dengan kalimat deskripsi singkat tentang topik utama, lalu poin-poin penting. Hindari pengulangan. Variasikan kata penghubung (selain itu, selanjutnya, di samping itu, dll.) - jangan gunakan "juga" berulang kali. Tanpa pembukaan lain, langsung rangkuman saja.
+const SUMMARIZE_MERGE_PROMPT = `Gabungkan rangkuman berikut menjadi satu rangkuman koheren dalam Bahasa Indonesia.
+
+ATURAN PENTING:
+- DEDUPLIKASI: Poin yang sama atau mirip hanya perlu disebut SATU KALI. Hapus semua pengulangan.
+- Awali dengan kalimat deskripsi singkat tentang topik utama, lalu poin-poin penting (tanpa duplikat).
+- Variasikan kata penghubung (selain itu, selanjutnya, di samping itu, dll.) - jangan gunakan "juga" berulang kali.
+- Pastikan rangkuman selesai LENGKAP; jangan potong di tengah kalimat atau paragraf.
+- Tanpa pembukaan lain, langsung rangkuman saja.
 
 Rangkuman per bagian:
 
@@ -177,7 +202,7 @@ export async function summarizeWithGroq(
       body: JSON.stringify({
         model: GROQ_MODEL,
         messages: [{ role: "user", content: prompt }],
-        max_tokens: 1024,
+        max_tokens: 4096,
         temperature: 0.3,
       }),
     });

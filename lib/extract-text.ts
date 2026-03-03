@@ -147,6 +147,8 @@ function extractTextFromSrt(buffer: Buffer): string {
 export type ExtractTextOptions = {
   /** For PDF: fallback to OCR when text extraction yields little. Requires apiKey for Groq Vision. */
   ocrFallback?: (images: PdfPageImage[]) => Promise<string>;
+  /** Called during extraction for progress UI. */
+  onProgress?: (message: string) => void;
 };
 
 /**
@@ -161,29 +163,37 @@ export async function extractText(
 
   switch (mimeType) {
     case "text/plain":
+      options?.onProgress?.("Membaca file teks…");
       text = extractTextFromTxt(buffer);
       break;
     case "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
     case "application/msword":
+      options?.onProgress?.("Mengekstrak teks dari Word…");
       text = await extractTextFromDocx(buffer);
       break;
     case "application/rtf":
     case "text/rtf":
+      options?.onProgress?.("Mengekstrak teks dari RTF…");
       text = await extractTextFromRtf(buffer);
       break;
     case "application/vnd.oasis.opendocument.text":
+      options?.onProgress?.("Mengekstrak teks dari ODT…");
       text = extractTextFromOdt(buffer);
       break;
     case "application/x-subrip":
+      options?.onProgress?.("Memproses subtitle SRT…");
       text = extractTextFromSrt(buffer);
       break;
     case "application/pdf":
+      options?.onProgress?.("Mengekstrak teks dari PDF…");
       text = await extractTextFromPdf(buffer);
       // PDF: optional OCR fallback for scanned documents
       if (options?.ocrFallback && (!text.trim() || text.length < 50)) {
         try {
+          options?.onProgress?.("Mengonversi halaman PDF ke gambar…");
           const images = await pdfPagesToImages(buffer, { maxPages: 20 });
           if (images.length > 0) {
+            options?.onProgress?.(`Mengekstrak teks dengan OCR (${images.length} halaman)…`);
             text = await options.ocrFallback(images);
           }
         } catch {
@@ -194,19 +204,24 @@ export async function extractText(
     default:
       // Try to detect by file signature / extension as fallback
       if (buffer[0] === 0x50 && buffer[1] === 0x4b) {
-        // ZIP signature - could be DOCX or ODT
         if (buffer.toString("utf-8", 0, 100).includes("word/")) {
+          options?.onProgress?.("Mengekstrak teks dari Word…");
           text = await extractTextFromDocx(buffer);
         } else {
+          options?.onProgress?.("Mengekstrak teks dari ODT…");
           text = extractTextFromOdt(buffer);
         }
       } else if (buffer[0] === 0x25 && buffer[1] === 0x50 && buffer[2] === 0x44 && buffer[3] === 0x46) {
+        options?.onProgress?.("Mengekstrak teks dari PDF…");
         text = await extractTextFromPdf(buffer);
       } else if (buffer.toString("utf-8", 0, 10).includes("{\\rtf")) {
+        options?.onProgress?.("Mengekstrak teks dari RTF…");
         text = await extractTextFromRtf(buffer);
       } else if (/^\d+\s*\n\d{2}:\d{2}:\d{2},\d{3}/m.test(buffer.toString("utf-8", 0, 200))) {
+        options?.onProgress?.("Memproses subtitle SRT…");
         text = extractTextFromSrt(buffer);
       } else {
+        options?.onProgress?.("Membaca file teks…");
         text = extractTextFromTxt(buffer);
       }
   }

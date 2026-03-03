@@ -10,7 +10,7 @@ export const MAX_TEXT_LENGTH = 30000;
 /** Chunk size for summarization (~2000 tokens). Keeps requests under Groq TPM limit. */
 export const SUMMARIZE_CHUNK_SIZE = 8000;
 /** Delay between chunk requests to avoid Groq TPM rate limit (429). */
-export const SUMMARIZE_CHUNK_DELAY_MS = 2500;
+export const SUMMARIZE_CHUNK_DELAY_MS = 6000;
 export const GROQ_IMAGES_PER_REQUEST = 1;
 
 /**
@@ -32,6 +32,12 @@ export function deduplicateParagraphs(text: string): string {
     result.push(p);
   }
   return result.join("\n\n");
+}
+
+/** Fixes common typos in Indonesian text (e.g. from LLM output). */
+export function fixCommonTypos(text: string): string {
+  if (!text) return text;
+  return text.replace(/\bmenafigasi\b/gi, "menavigasi");
 }
 
 export function splitIntoChunks(text: string, maxSize: number): string[] {
@@ -130,22 +136,77 @@ Pertahankan urutan. Kembalikan sebagai teks biasa dalam Bahasa Indonesia.`;
 
 const SUMMARIZE_PROMPT = `Anda adalah asisten yang merangkum dokumen. Aturan:
 - Tulis rangkuman dalam Bahasa Indonesia.
-- Istilah teknis (misalnya: API, PDF, database, framework, dll.) tetap gunakan istilah aslinya, jangan diterjemahkan.
-- Awali rangkuman dengan kalimat deskripsi dokumen, contoh: "Dokumen ini berisi hal tentang [topik utama dokumen]."
-- Setelah itu, lanjutkan dengan poin-poin penting secara ringkas.
-- Variasikan struktur kalimat. Hindari pengulangan kata "juga" di awal kalimat berturut-turut.
-- Untuk dokumen rapat/notula: sertakan nama orang untuk usulan dan pertanyaan penting. Pisahkan tindak lanjut (koordinasi, verifikasi, analisis yang diminta) jika ada.
-- Untuk dokumen teknis/rapat IT: sertakan poin teknis penting seperti fitur spesifik (SSL VPN, FortiClient, FortiGuard), mode operasi (Proxy, Static URL, Full Flow, Quick Flow), dan batasan/opsi (misalnya: tanpa lisensi, satu sertifikat per perangkat).
-- PENTING: Gunakan konten dari SEMUA halaman dokumen (Halaman 1 sampai terakhir). Jangan hanya merangkum halaman terakhir - sertakan poin penting dari halaman awal dan tengah.
-- Jangan hanya menyatakan kesimpulan abstrak. Berikan contoh konkret dari dokumen yang mendukung kesimpulan itu.
-- Jaga struktur dan poin kunci. Tanpa pembukaan lain, langsung rangkuman saja.
+- Istilah teknis (API, PDF, database, framework, XSS, ITSA, dll.) tetap gunakan istilah aslinya, jangan diterjemahkan.
+
+PENTING - TENTUKAN JENIS DOKUMEN DULU:
+- Format RAPAT/NOTULA untuk: (a) dokumen rapat resmi dengan peserta, jalannya rapat, diskusi; atau (b) transkrip pertemuan/paparan (mis. pertemuan dengan pejabat, diskusi, paparan hasil).
+- Jangan gunakan format rapat untuk: buku, artikel, transkrip podcast/video umum yang bukan pertemuan, pedoman. Gunakan format "Dokumen Bukan Rapat".
+
+UNTUK DOKUMEN RAPAT/NOTULA/PERTEMUAN:
+Gunakan format terstruktur dengan MARKDOWN:
+
+FORMAT MARKDOWN (wajib):
+- Gunakan **bold** untuk heading section (mis. **Jalannya Rapat:**) dan istilah penting: nama orang, organisasi, istilah teknis (mis. **high risk**, **Broken Access Control**, **PSSI**, **naturalisasi**).
+- Poin utama: daftar bernomor (1., 2., 3.).
+- Sub-poin: daftar huruf (a., b., c.) di bawah poin utama (indent 2 spasi).
+- Beri baris kosong antara section utama.
+
+**Metadata**
+Hari, Tanggal, Pukul, Tempat (dan Link jika rapat daring).
+
+**Peserta Rapat**
+Hadir: organisasi/unit dan nama-nama peserta. Berhalangan hadir (jika ada).
+
+**Acara**
+Judul rapat (satu kalimat).
+
+**Jalannya Rapat:**
+1. Pembukaan: siapa membuka, agenda singkat.
+2. Paparan utama:
+   a. [sub-poin pertama]
+   b. [sub-poin kedua]
+   c. [dst.]
+3. Diskusi dan tanya jawab: **NAMA** penanya, pertanyaan, **NAMA** penjawab, jawaban.
+4. Penutupan: siapa menutup.
+
+**Tindak Lanjut**
+Koordinasi, dokumen yang diserahkan, deadline, PIC.
+
+**Kesimpulan**
+Ringkasan poin penutup. Boleh tambahkan insight Anda sendiri: analisis, rekomendasi, atau observasi yang relevan dengan dokumen. Insight boleh berupa sintesis, implikasi, atau saran yang tidak eksplisit di dokumen, selama tetap kontekstual.
+
+**Penandatangan** (jika ada)
+Notulis, Ketua Tim.
+
+UNTUK DOKUMEN BUKAN RAPAT (buku, artikel, pedoman, transkrip podcast/video):
+- Awali dengan kalimat deskripsi: "Dokumen ini berisi hal tentang [topik utama]."
+- Lanjutkan dengan poin-poin penting secara ringkas.
+- Berikan contoh konkret dari dokumen. Jangan hanya kesimpulan abstrak.
+- JANGAN gunakan format notula (Metadata, Peserta Rapat, Acara, dll.) untuk dokumen ini.
+- Variasikan frasa: jangan ulangi "penulis berpendapat" berkali-kali; gunakan "menurut penulis", "penulis menyatakan", "penulis mengemukakan", dll.
+- Paragraf kesimpulan tidak boleh mengulang pembukaan; fokus pada ringkasan atau poin penutup yang baru. Boleh tambahkan insight Anda sendiri (analisis, rekomendasi, observasi) yang relevan dengan dokumen.
+- KONSOLIDASI: Gabungkan poin yang mirip menjadi satu paragraf. Jangan ulangi ide yang sama di paragraf berbeda.
+- Untuk dokumen pendek: batasi 3–4 paragraf; setiap poin utama hanya disebut satu kali.
+
+ATURAN UMUM:
+- DEDUPLIKASI: Poin yang sama atau mirip hanya perlu disebut SATU KALI. Hindari pengulangan ide.
+- Hindari kata "juga" di awal atau akhir kalimat. Variasikan struktur kalimat.
+- Perbaiki typo umum (mis. "menafigasi" → "menavigasi").
+- Gunakan konten dari SEMUA halaman dokumen. Jangan hanya merangkum halaman terakhir.
+- Tanpa pembukaan lain, langsung rangkuman saja.
 - Pastikan rangkuman selesai lengkap; jangan potong di tengah kalimat.
 
 Dokumen:
 
 `;
 
-const SUMMARIZE_CHUNK_PROMPT = `Rangkum bagian berikut secara ringkas dalam Bahasa Indonesia. Fokus pada poin-poin penting dan UNIK. Jangan ulangi frasa atau poin yang sama. Variasikan struktur kalimat; hindari pengulangan kata "juga". Tanpa pembukaan, langsung rangkuman saja. Pastikan kalimat terakhir selesai lengkap.
+const SUMMARIZE_CHUNK_PROMPT = `Rangkum bagian berikut secara ringkas dalam Bahasa Indonesia.
+- Fokus pada poin-poin penting dan UNIK. Poin yang sama hanya disebut SATU KALI. Gabungkan ide mirip; jangan ulangi di paragraf berbeda.
+- Jika bagian ini dari notula/pertemuan (ada peserta, jalannya rapat, diskusi): PERTAHANKAN nama orang, organisasi/unit, detail teknis. Gunakan format: daftar bernomor (1., 2.) dan sub-list huruf (a., b., c.). Bold (**) untuk nama orang, organisasi, istilah teknis.
+- Jika bagian ini dari buku/artikel/podcast: rangkum sebagai poin-poin biasa, jangan paksakan format notula. Variasikan frasa (jangan ulangi "penulis berpendapat" berkali-kali).
+- Hindari kata "juga" di awal atau akhir kalimat. Variasikan struktur kalimat.
+- Perbaiki typo umum (mis. "menafigasi" → "menavigasi").
+- Tanpa pembukaan, langsung rangkuman saja. Pastikan kalimat terakhir selesai lengkap.
 
 Bagian:
 
@@ -154,9 +215,11 @@ Bagian:
 const SUMMARIZE_MERGE_PROMPT = `Gabungkan rangkuman berikut menjadi satu rangkuman koheren dalam Bahasa Indonesia.
 
 ATURAN PENTING:
-- DEDUPLIKASI: Poin yang sama atau mirip hanya perlu disebut SATU KALI. Hapus semua pengulangan.
-- Awali dengan kalimat deskripsi singkat tentang topik utama, lalu poin-poin penting (tanpa duplikat).
-- Variasikan kata penghubung (selain itu, selanjutnya, di samping itu, dll.) - jangan gunakan "juga" berulang kali.
+- DEDUPLIKASI: Poin yang sama atau mirip hanya perlu disebut SATU KALI. Gabungkan ide mirip menjadi satu paragraf; jangan ulangi di paragraf berbeda.
+- Format RAPAT/NOTULA hanya jika rangkuman per bagian JELAS berisi rapat/pertemuan (peserta, jalannya rapat, diskusi). Gabungkan ke format terstruktur dengan MARKDOWN: **bold** untuk heading dan istilah penting, daftar bernomor (1., 2.) dan sub-list huruf (a., b., c.). Pertahankan nama orang dan detail teknis. Untuk **Kesimpulan**: boleh tambahkan insight Anda sendiri (analisis, rekomendasi, observasi) yang relevan.
+- Jika rangkuman berisi buku/artikel/podcast (tidak ada peserta rapat, jalannya rapat): JANGAN gunakan format notula. Awali dengan kalimat deskripsi singkat tentang topik utama, lalu poin-poin penting (tanpa duplikat). Paragraf kesimpulan jangan mengulang pembukaan; boleh tambahkan insight Anda sendiri (analisis, rekomendasi). Batasi 3–4 paragraf untuk dokumen pendek.
+- Hindari kata "juga" di awal atau akhir kalimat. Variasikan kata penghubung dan frasa (selain itu, selanjutnya, menurut penulis, dll.) - jangan gunakan "penulis berpendapat" berulang kali.
+- Perbaiki typo umum (mis. "menafigasi" → "menavigasi").
 - Pastikan rangkuman selesai LENGKAP; jangan potong di tengah kalimat atau paragraf.
 - Tanpa pembukaan lain, langsung rangkuman saja.
 
@@ -169,7 +232,7 @@ export function sleep(ms: number): Promise<void> {
 }
 
 /** Parse "try again in X.XXs" from Groq 429 error. Returns ms to wait, or default. */
-function parseRetryAfterMs(errBody: string, defaultMs: number): number {
+export function parseRetryAfterMs(errBody: string, defaultMs: number): number {
   const match = errBody.match(/try again in ([\d.]+)s/i);
   if (match) {
     const sec = parseFloat(match[1]);
@@ -211,7 +274,8 @@ export async function summarizeWithGroq(
       const json = (await res.json()) as {
         choices?: Array<{ message?: { content?: string } }>;
       };
-      return json.choices?.[0]?.message?.content?.trim() ?? "";
+      const raw = json.choices?.[0]?.message?.content?.trim() ?? "";
+      return fixCommonTypos(raw);
     }
 
     const errBody = await res.text();
@@ -233,14 +297,19 @@ export async function summarizeWithGroq(
  * Creates an OCR fallback function for extractText.
  * Processes PDF pages via Vision API and returns concatenated text with page markers.
  */
-export function createOcrFallback(apiKey: string) {
+export function createOcrFallback(
+  apiKey: string,
+  onProgress?: (message: string) => void
+) {
   return async (images: PdfPageImage[]): Promise<string> => {
     const chunks: string[] = [];
     const totalPages = images.length;
     for (let i = 0; i < images.length; i += GROQ_IMAGES_PER_REQUEST) {
       const batch = images.slice(i, i + GROQ_IMAGES_PER_REQUEST);
-      const extracted = await extractTextFromImages(batch, apiKey, totalPages);
       const pageNum = batch[0].pageNum;
+      const pageEnd = batch.length > 1 ? batch[batch.length - 1].pageNum : pageNum;
+      onProgress?.(`OCR halaman ${pageNum}${pageEnd !== pageNum ? `–${pageEnd}` : ""} dari ${totalPages}…`);
+      const extracted = await extractTextFromImages(batch, apiKey, totalPages);
       chunks.push(
         extracted.trim()
           ? `[Halaman ${pageNum}]\n${extracted}`

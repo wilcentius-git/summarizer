@@ -6,7 +6,7 @@ A simple web app to upload documents and get AI-generated summaries.
 
 - **Upload documents** – Add files via file picker or drag and drop (max 500 MB per file). Supports: **PDF**, **DOCX**, **DOC**, **TXT**, **RTF**, **ODT**, **SRT**, **MP3**, **WAV**, **M4A**, **WebM**, **FLAC**, **OGG**.
 - **Summarize** – Extract text and get a concise summary via Groq (Llama). Supports scanned PDFs via OCR (Groq Vision) and **audio transcription** via Groq Whisper (MP3, WAV, etc., max 25 MB for free tier).
-- **Summarize Meeting** – Analyze meeting transcripts or **recorded audio** to extract participant stances, alignment risks, and agreement confidence (Indonesian business conversations).
+- **Segmented Summarize** – Works on text with **label and opinion format** (e.g., speaker-labeled transcripts, structured opinions). The model checks the format first; if not found, returns "no segmented opinion format". For **audio (MP3, etc.)**: optionally use **pyannote.audio** (via WhisperX) for speaker diarization when a Hugging Face token is provided.
 
 ## Setup
 
@@ -23,6 +23,71 @@ A simple web app to upload documents and get AI-generated summaries.
    ```
 
 3. Open [http://localhost:3000](http://localhost:3000) and enter your Groq API key in the form (get a free key at [console.groq.com](https://console.groq.com)). The key is cached for 1 hour in your browser.
+
+### Segmented Summarize with speaker diarization (optional)
+
+For **audio files** with speaker labels via pyannote:
+
+1. Install Python 3.8+ and create a virtual environment:
+   ```bash
+   python -m venv summarizer_venv
+   .\summarizer_venv\Scripts\pip.exe install -r scripts/requirements.txt   # Windows
+   # or: summarizer_venv/bin/pip install -r scripts/requirements.txt       # macOS/Linux
+   ```
+   The app uses `summarizer_venv` automatically when it exists.
+
+2. To run the diarize script from the CLI, activate the venv first:
+   ```powershell
+   .\summarizer_venv\Scripts\Activate.ps1   # Windows PowerShell
+   # or: summarizer_venv\Scripts\activate.bat   # Windows cmd
+   # or: source summarizer_venv/bin/activate    # macOS/Linux
+   ```
+   Then run: `python scripts/diarize_transcribe.py <audio_path> <hf_token>`
+
+3. Accept the pyannote model license at [huggingface.co/pyannote/speaker-diarization-3.1](https://huggingface.co/pyannote/speaker-diarization-3.1).
+
+4. Create a Hugging Face token at [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens) and enter it in the app when using Segmented Summarize on audio. For CLI usage, pass it as the second argument.
+
+Without the HF token, Segmented Summarize on audio falls back to Groq Whisper (no speaker labels).
+
+**If you get Hugging Face Hub download errors** (e.g. "cannot find the appropriate snapshot folder"), pre-download the model when your connection is stable:
+
+```bash
+python scripts/pre_download_pyannote.py <your_hf_token>
+# Or set HF_TOKEN or HUGGINGFACE_API_KEY in .env.local
+```
+
+### GPU (CUDA) support for faster diarization
+
+By default, `pip install -r scripts/requirements.txt` installs PyTorch CPU-only. For **GPU acceleration** (much faster on long audio):
+
+**Note:** PyTorch CUDA wheels for Windows support **Python 3.8–3.12** only. If you use Python 3.13+, create a venv with Python 3.12: `py -3.12 -m venv summarizer_venv`
+
+1. Check your CUDA version: `nvidia-smi` (e.g. 12.1 or 11.8).
+2. Install PyTorch with CUDA (use venv first: `.\summarizer_venv\Scripts\Activate.ps1` on Windows):
+   ```bash
+   npm run install:gpu
+   ```
+   Or manually: `pip install -r scripts/requirements-cuda.txt`
+   For CUDA 11.8, edit `scripts/requirements-cuda.txt` and change `cu121` to `cu118`.
+3. Verify: `python -c "import torch; print('CUDA:', torch.cuda.is_available())"` → should print `CUDA: True`.
+
+The app will use GPU automatically when available and show `[GPU (CUDA)]` or `[CPU]` in the summary caption.
+
+### TorchCodec / FFmpeg issues on Windows
+
+If diarization fails with "Could not load libtorchcodec" or FFmpeg DLL errors when using Segmented Summarize from the web app (but works from CLI), the script now uses **torchaudio** for audio loading to bypass torchcodec. If you still see issues:
+
+1. **Uninstall torchcodec** (pyannote will fall back to torchaudio):
+   ```bash
+   .\summarizer_venv\Scripts\Activate.ps1
+   pip uninstall torchcodec -y
+   ```
+2. Or install FFmpeg "full-shared" with DLLs: [ffmpeg.org](https://ffmpeg.org/download.html) → Windows builds → "full-shared".
+
+### API timeout
+
+The Segmented Summarize API allows up to **2 hours** (`maxDuration: 7200`) for long audio diarization. Local dev has no timeout; Vercel caps by plan (Hobby: 10s, Pro: 60s, Enterprise: 900s).
 
 ## Build
 
@@ -111,19 +176,15 @@ Or connect your repo to [Vercel](https://vercel.com) for automatic deployments.
 
 5. **Response** – Streamed as NDJSON: `progress` events, then `summary` or `error`.
 
-### Meeting Analysis Flow
+### Segmented Summarize Flow
 
-1. **Text extraction** – Same as above. For audio files, Groq Whisper transcribes first. Transcript truncated to 30,000 chars if longer.
+1. **Text extraction** – Documents: same as Summarize. Audio: if Hugging Face token provided, run `scripts/diarize_transcribe.py` (WhisperX + pyannote) for speaker-labeled transcript; otherwise Groq Whisper (single speaker).
 
-2. **Normalization** – `normalizeTranscript()` parses `Speaker: text` turns, strips Indonesian prefixes (Bpk., Ibu, Pak, Bu), merges continuation lines.
+2. **Format check** – LLM checks if text has "label and opinion" format (e.g., `Speaker: opinion`, `Topic: opinion`). If not, returns `no segmented opinion format`.
 
-3. **LLM analysis** – Single Groq call with `llama-3.1-8b-instant`:
-   - System prompt: meeting analysis engine, stance classification (support/mixed/oppose), risk types (hedging, deflection, vagueness, etc.)
-   - User prompt: leader name/position, transcript, task description
+3. **Segmented summarization** – If format valid, LLM groups by topic and summarizes each speaker's opinion per topic in Indonesian, with stance labels: **pro** (mendukung), **con** (menentang), or **performative** (netral/formal).
 
-4. **Post-processing** – Parse JSON, merge duplicate speakers, derive `agreement_confidence` from stances when missing.
-
-5. **Response** – JSON with `leader`, `participants` (points, risks, summary per person).
+4. **Response** – JSON with `summary` (topic-based, per-speaker opinions + stance) or `error` (e.g., `no segmented opinion format`).
 
 ### Models
 
@@ -131,8 +192,9 @@ Or connect your repo to [Vercel](https://vercel.com) for automatic deployments.
 |--------------------|--------------------------------------------|
 | Text summarization | `llama-3.1-8b-instant`                     |
 | PDF OCR (Vision)   | `meta-llama/llama-4-scout-17b-16e-instruct`|
-| Audio transcription| `whisper-large-v3-turbo`                  |
-| Meeting analysis   | `llama-3.1-8b-instant`                     |
+| Audio transcription| `whisper-large-v3-turbo`                   |
+| Segmented summarize| `llama-3.1-8b-instant`                     |
+| Speaker diarization| WhisperX + pyannote (optional, Python)     |
 
 ### Limits
 

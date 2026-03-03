@@ -68,8 +68,8 @@ export function resolveAudioMimeType(mimeType: string, fileName?: string): strin
   return mimeType;
 }
 
-const WHISPER_RETRY_ATTEMPTS = 2;
-const WHISPER_RETRY_DELAY_MS = 3000;
+const WHISPER_RETRY_ATTEMPTS = 3;
+const WHISPER_RETRY_DELAY_MS = 5000;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
@@ -104,26 +104,40 @@ async function transcribeSingleChunk(
 
   let lastError: Error | null = null;
   for (let attempt = 0; attempt <= WHISPER_RETRY_ATTEMPTS; attempt++) {
-    const res = await fetch(GROQ_TRANSCRIPTION_URL, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: formData,
-    });
+    try {
+      const res = await fetch(GROQ_TRANSCRIPTION_URL, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: formData,
+      });
 
-    if (res.ok) {
-      return res.text();
+      if (res.ok) {
+        return res.text();
+      }
+
+      const errBody = await res.text();
+      lastError = new Error(`Groq Whisper error: ${res.status}. ${errBody}`);
+
+      if (res.status === 524 && attempt < WHISPER_RETRY_ATTEMPTS) {
+        await sleep(WHISPER_RETRY_DELAY_MS);
+        continue;
+      }
+      throw lastError;
+    } catch (err) {
+      const isRetryable =
+        err instanceof TypeError ||
+        (err instanceof Error &&
+          (/fetch|ECONNRESET|ECONNREFUSED|ETIMEDOUT|socket hang up/i.test(err.message) ||
+            (err as Error & { cause?: Error }).cause?.message?.includes("ECONNRESET")));
+      lastError = err instanceof Error ? err : new Error(String(err));
+      if (isRetryable && attempt < WHISPER_RETRY_ATTEMPTS) {
+        await sleep(WHISPER_RETRY_DELAY_MS);
+        continue;
+      }
+      throw lastError;
     }
-
-    const errBody = await res.text();
-    lastError = new Error(`Groq Whisper error: ${res.status}. ${errBody}`);
-
-    if (res.status === 524 && attempt < WHISPER_RETRY_ATTEMPTS) {
-      await sleep(WHISPER_RETRY_DELAY_MS);
-      continue;
-    }
-    throw lastError;
   }
   throw lastError;
 }

@@ -1,0 +1,8 @@
+# Speaker diarization + transcription for Segmented Summarize
+# Install: pip install -r scripts/requirements.txt
+# Requires: Hugging Face token (accept pyannote model license at huggingface.co/pyannote/speaker-diarization-3.1)
+
+whisperx>=3.1.0
+torch
+torchaudio
+soundfile

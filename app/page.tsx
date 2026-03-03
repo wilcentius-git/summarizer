@@ -8,31 +8,8 @@ import kemenkumLogo from "@/assets/kemenkum_logo.png";
 
 const GROQ_API_KEY_CACHE_DURATION_MS = 60 * 60 * 1000; // 1 hour
 const GROQ_API_KEY_CACHE_KEY = "groqApiKeyCache";
-
-type MeetingPoint = {
-  topic: string;
-  stance: "support" | "mixed" | "oppose" | "unclear";
-  evidence: string[];
-};
-
-type MeetingRisk = {
-  type: string;
-  score: number;
-  evidence: string[];
-};
-
-type MeetingParticipant = {
-  speaker: string;
-  agreement_confidence?: number;
-  points: MeetingPoint[];
-  risks: MeetingRisk[];
-  summary?: string;
-};
-
-type MeetingAnalysis = {
-  leader: { name: string; position: string };
-  participants: MeetingParticipant[];
-};
+const HF_TOKEN_CACHE_DURATION_MS = 60 * 60 * 1000; // 1 hour
+const HF_TOKEN_CACHE_KEY = "hfTokenCache";
 
 const MAX_FILE_SIZE_MB = 500;
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
@@ -63,151 +40,6 @@ const SUPPORTED_MIME_TYPES = new Set([
   "audio/flac",
   "audio/ogg",
 ]);
-
-const STANCE_STYLES: Record<string, string> = {
-  support: "bg-emerald-100 text-emerald-800",
-  oppose: "bg-rose-100 text-rose-800",
-  mixed: "bg-amber-100 text-amber-800",
-  unclear: "bg-slate-100 text-slate-600",
-};
-
-const STANCE_LABELS: Record<string, string> = {
-  support: "Mendukung",
-  oppose: "Menentang",
-  mixed: "Campuran",
-  unclear: "Tidak jelas",
-};
-
-const RISK_LABELS: Record<string, string> = {
-  hedging: "Hedging",
-  concession_flip: "Setuju + pemblokir",
-  vagueness: "Kesepakatan samar",
-  deflection: "Defleksi / penghindaran",
-  inconsistency: "Ketidakonsistenan",
-  no_ownership: "Tanpa kepemilikan",
-};
-
-function MeetingAnalysisDisplay({
-  fileName,
-  data,
-  onExportPdf,
-}: {
-  fileName: string;
-  data: MeetingAnalysis;
-  onExportPdf?: () => void;
-}) {
-  const { leader, participants } = data;
-  const list = participants ?? [];
-
-  return (
-    <section className="mt-8 text-left">
-      <div className="mb-6">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h2 className="text-lg font-semibold text-kemenkum-blue">Analisis Rapat</h2>
-            <p className="text-sm text-slate-500 mt-1">{fileName}</p>
-            <p className="text-sm text-slate-600 mt-1">
-              Pemimpin: <strong>{leader.name}</strong>
-              {leader.position && ` — ${leader.position}`}
-            </p>
-          </div>
-          {onExportPdf && (
-            <button
-              type="button"
-              onClick={onExportPdf}
-              className="px-3 py-1.5 rounded bg-kemenkum-yellow text-kemenkum-blue text-sm font-medium hover:opacity-90 flex-shrink-0"
-            >
-              Export to PDF
-            </button>
-          )}
-        </div>
-      </div>
-
-      <div className="space-y-4">
-        {list.map((p, i) => (
-          <article
-            key={i}
-            className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm"
-          >
-            <div className="flex flex-wrap items-center gap-3 mb-4">
-              <h3 className="font-semibold text-kemenkum-blue">{p.speaker}</h3>
-              {p.agreement_confidence != null && (
-                <span
-                  className={`text-sm px-2.5 py-0.5 rounded-full font-medium ${
-                    p.agreement_confidence <= 2
-                      ? "bg-rose-100 text-rose-800"
-                      : p.agreement_confidence <= 3
-                        ? "bg-amber-100 text-amber-800"
-                        : "bg-emerald-100 text-emerald-800"
-                  }`}
-                  title="1 = tidak setuju sama sekali, 5 = sangat setuju"
-                >
-                  Kesepakatan: {p.agreement_confidence}/5
-                </span>
-              )}
-            </div>
-
-            {p.points?.length ? (
-              <div className="mb-4">
-                <h4 className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-2">
-                  Posisi per topik
-                </h4>
-                <ul className="space-y-2">
-                  {p.points.map((pt, j) => (
-                    <li key={j} className="flex flex-wrap items-baseline gap-2">
-                      <span
-                        className={`text-xs px-2 py-0.5 rounded ${
-                          STANCE_STYLES[pt.stance] ?? STANCE_STYLES.unclear
-                        }`}
-                      >
-                        {STANCE_LABELS[pt.stance] ?? pt.stance}
-                      </span>
-                      <span className="text-sm text-slate-700">{pt.topic}</span>
-                      {pt.evidence?.length ? (
-                        <span className="text-xs text-slate-500 italic">
-                          — &quot;{pt.evidence[0]}&quot;
-                        </span>
-                      ) : null}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
-
-            {p.risks?.length ? (
-              <div>
-                <h4 className="text-xs font-medium text-amber-700 uppercase tracking-wide mb-2">
-                  Indikator risiko alignment
-                </h4>
-                <ul className="space-y-2">
-                  {p.risks.map((r, j) => (
-                    <li key={j} className="flex flex-wrap items-baseline gap-2 text-sm">
-                      <span className="text-amber-700">
-                        {RISK_LABELS[r.type] ?? r.type}
-                      </span>
-                      <span className="text-slate-500">{(r.score * 100).toFixed(0)}%</span>
-                      {r.evidence?.length ? (
-                        <span className="text-slate-600">
-                          — {r.evidence.map((e) => `"${e}"`).join(", ")}
-                        </span>
-                      ) : null}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
-
-            {p.summary ? (
-              <p className="mt-4 pt-4 border-t border-slate-100 text-sm text-slate-600 italic">
-                {p.summary}
-              </p>
-            ) : null}
-          </article>
-        ))}
-      </div>
-    </section>
-  );
-}
 
 function isSupportedFile(file: File): boolean {
   if (SUPPORTED_MIME_TYPES.has(file.type)) return true;
@@ -252,6 +84,26 @@ function saveGroqApiKeyToCache(key: string) {
   localStorage.setItem(GROQ_API_KEY_CACHE_KEY, JSON.stringify(cache));
 }
 
+function loadCachedHfToken(): string {
+  if (typeof window === "undefined") return "";
+  try {
+    const stored = localStorage.getItem(HF_TOKEN_CACHE_KEY);
+    if (!stored) return "";
+    const { key, expiresAt } = JSON.parse(stored) as { key?: string; expiresAt?: number };
+    if (key && expiresAt && Date.now() < expiresAt) return key;
+    localStorage.removeItem(HF_TOKEN_CACHE_KEY);
+  } catch {
+    localStorage.removeItem(HF_TOKEN_CACHE_KEY);
+  }
+  return "";
+}
+
+function saveHfTokenToCache(key: string) {
+  if (typeof window === "undefined" || !key.trim()) return;
+  const cache = { key: key.trim(), expiresAt: Date.now() + HF_TOKEN_CACHE_DURATION_MS };
+  localStorage.setItem(HF_TOKEN_CACHE_KEY, JSON.stringify(cache));
+}
+
 /** Rough estimate: ~45s per 50KB, minimum 30s */
 function estimateSummarizeSeconds(fileSizeBytes: number): number {
   return Math.max(30, Math.ceil(fileSizeBytes / 50000) * 45);
@@ -263,8 +115,22 @@ function estimateAudioTranscribeSeconds(fileSizeBytes: number): number {
   return Math.max(30, Math.ceil(mb) * 7);
 }
 
+function formatProcessTime(seconds: number): string {
+  if (seconds < 60) return `${seconds} seconds`;
+  if (seconds < 3600) return `${(seconds / 60).toFixed(1)} minutes`;
+  return `${(seconds / 3600).toFixed(1)} hours`;
+}
+
+const SEGMENTED_TIPS = [
+  "Diarisasi dapat memakan waktu beberapa menit untuk audio panjang.",
+  "Format label+opini: setiap pembicara/topik diikuti pendapat.",
+  "Tanpa HF token, audio menggunakan Groq Whisper (tanpa label pembicara).",
+  "Dokumen dengan struktur jelas lebih mudah dianalisis.",
+];
+
 export default function Home() {
   const [groqApiKey, setGroqApiKey] = useState("");
+  const [hfToken, setHfToken] = useState("");
   const [files, setFiles] = useState<FileItem[]>([]);
   const [dragActive, setDragActive] = useState(false);
   const [summarizeLoading, setSummarizeLoading] = useState<string | null>(null);
@@ -282,11 +148,16 @@ export default function Home() {
 
   useEffect(() => {
     setGroqApiKey(loadCachedGroqApiKey());
+    setHfToken(loadCachedHfToken());
   }, []);
 
   useEffect(() => {
     if (groqApiKey.trim()) saveGroqApiKeyToCache(groqApiKey);
   }, [groqApiKey]);
+
+  useEffect(() => {
+    if (hfToken.trim()) saveHfTokenToCache(hfToken);
+  }, [hfToken]);
 
   useEffect(() => {
     if (!summarizeLoading) {
@@ -299,24 +170,59 @@ export default function Home() {
     }, 1000);
     return () => clearInterval(interval);
   }, [summarizeLoading]);
+  type MeetingParticipant = {
+    speaker: string;
+    agreement_confidence?: number;
+    points?: Array<{ topic: string; stance: string; evidence?: string[] }>;
+    risks?: Array<{ type: string; score: number; evidence?: string[] }>;
+    summary?: string;
+  };
   const [summary, setSummary] = useState<{
     fileId: string;
     fileName: string;
     text: string;
+    diarized?: boolean;
+    device?: string;
+    elapsedSeconds?: number;
+    analysis?: { leader?: { name: string; position: string }; participants: MeetingParticipant[] };
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const [meetingModalState, setMeetingModalState] = useState<{
-    fileId: string;
-    leaderName: string;
-    leaderPosition: string;
+  const [segmentedLoading, setSegmentedLoading] = useState<string | null>(null);
+  const [segmentedProgress, setSegmentedProgress] = useState<{
+    step: number;
+    stepLabel: string;
+    message?: string;
   } | null>(null);
-  const [meetingLoading, setMeetingLoading] = useState<string | null>(null);
-  const [meetingAnalysis, setMeetingAnalysis] = useState<{
-    fileId: string;
-    fileName: string;
-    data: MeetingAnalysis;
-  } | null>(null);
+  const [segmentedElapsedSeconds, setSegmentedElapsedSeconds] = useState(0);
+  const segmentedAbortRef = useRef<AbortController | null>(null);
+
+  const [leaderName, setLeaderName] = useState("");
+  const [leaderPosition, setLeaderPosition] = useState("");
+  const [segmentedTipIndex, setSegmentedTipIndex] = useState(0);
+  useEffect(() => {
+    if (!segmentedLoading) return;
+    const interval = setInterval(() => {
+      setSegmentedTipIndex((i) => (i + 1) % SEGMENTED_TIPS.length);
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [segmentedLoading]);
+
+  useEffect(() => {
+    if (!segmentedLoading) {
+      setSegmentedElapsedSeconds(0);
+      return;
+    }
+    const start = Date.now();
+    const interval = setInterval(() => {
+      setSegmentedElapsedSeconds(Math.floor((Date.now() - start) / 1000));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [segmentedLoading]);
+
+  const cancelSegmented = useCallback(() => {
+    segmentedAbortRef.current?.abort();
+  }, []);
 
   const addFiles = useCallback((newFiles: FileList | null) => {
     if (!newFiles?.length) return;
@@ -349,10 +255,8 @@ export default function Home() {
   const removeFile = useCallback((id: string) => {
     setFiles((prev) => prev.filter((f) => f.id !== id));
     if (summary?.fileId === id) setSummary(null);
-    if (meetingAnalysis?.fileId === id) setMeetingAnalysis(null);
-    if (meetingModalState?.fileId === id) setMeetingModalState(null);
     setError(null);
-  }, [summary?.fileId, meetingAnalysis?.fileId, meetingModalState?.fileId]);
+  }, [summary?.fileId]);
 
   const handleDrag = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -392,6 +296,7 @@ export default function Home() {
 
       const controller = new AbortController();
       summarizeAbortRef.current = controller;
+      const startTime = Date.now();
 
       try {
         const formData = new FormData();
@@ -442,10 +347,12 @@ export default function Home() {
                   stepLabel: data.stepLabel,
                 });
               } else if (data.type === "summary") {
+                const elapsed = Math.floor((Date.now() - startTime) / 1000);
                 setSummary({
                   fileId: item.id,
                   fileName: item.name,
                   text: data.text ?? "",
+                  elapsedSeconds: elapsed,
                 });
               } else if (data.type === "error") {
                 throw new Error(data.message ?? "Summarization failed.");
@@ -505,10 +412,10 @@ export default function Home() {
     pdf.setTextColor(0, 0, 0);
     pdf.setFontSize(11);
 
-    const stripMarkdown = (s: string) =>
+    /** Strip markdown except **bold** (we preserve bold for PDF rendering). */
+    const stripMarkdownExceptBold = (s: string) =>
       s
-        .replace(/\*\*(.+?)\*\*/g, "$1")
-        .replace(/\*(.+?)\*/g, "$1")
+        .replace(/\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, "$1")
         .replace(/^#+\s*/gm, "")
         .replace(/^\s*[-*]\s+/gm, "• ")
         .replace(/^\s*\d+\.\s+/gm, "");
@@ -520,7 +427,7 @@ export default function Home() {
       }
     };
 
-    const lines = stripMarkdown(summary.text).split(/\r?\n/);
+    const lines = stripMarkdownExceptBold(summary.text).split(/\r?\n/);
     pdf.setFontSize(11);
 
     for (const line of lines) {
@@ -529,213 +436,149 @@ export default function Home() {
         y += lineHeight * 0.5;
         continue;
       }
-      const wrapped = pdf.splitTextToSize(trimmed, maxW);
-      addPageIfNeeded(wrapped.length * lineHeight);
-      pdf.text(wrapped, margin, y);
-      y += wrapped.length * lineHeight;
+
+      const parts = trimmed.split(/\*\*(.+?)\*\*/g);
+      let x = margin;
+
+      for (let i = 0; i < parts.length; i++) {
+        const text = parts[i];
+        if (!text) continue;
+        const isBold = i % 2 === 1;
+        pdf.setFont("helvetica", isBold ? "bold" : "normal");
+
+        const remainingW = Math.max(maxW - (x - margin), 1);
+        const wrapped = pdf.splitTextToSize(text, remainingW);
+
+        for (let j = 0; j < wrapped.length; j++) {
+          addPageIfNeeded(lineHeight);
+          if (j > 0) {
+            x = margin;
+            y += lineHeight;
+          }
+          const subline = wrapped[j];
+          pdf.text(subline, x, y);
+          x = margin + pdf.getTextWidth(subline);
+        }
+      }
+      y += lineHeight;
     }
 
     const baseName = (summary.fileName ?? "document").replace(/\.[^/.]+$/, "");
     pdf.save(`${baseName}_summary.pdf`);
   }, [summary?.text, summary?.fileName]);
 
-  const exportMeetingToPdf = useCallback(async () => {
-    if (!meetingAnalysis?.data) return;
-    const { jsPDF } = await import("jspdf");
-    const pdf = new jsPDF({ unit: "mm", format: "a4", orientation: "portrait" });
-    const margin = 15;
-    const pageW = pdf.internal.pageSize.getWidth();
-    const pageH = pdf.internal.pageSize.getHeight();
-    const maxW = pageW - 2 * margin;
-    const lineHeight = 5;
-    let y = margin;
-
-    const addPageIfNeeded = (needed: number) => {
-      if (y + needed > pageH - margin) {
-        pdf.addPage();
-        y = margin;
-      }
-    };
-
-    const wrapText = (text: string, maxWidth: number) =>
-      pdf.splitTextToSize(text, maxWidth);
-
-    // Header: Analisis Rapat
-    pdf.setFontSize(14);
-    pdf.setTextColor(30, 64, 175); // kemenkum-blue
-    pdf.text("Analisis Rapat", margin, y);
-    y += lineHeight * 1.5;
-
-    pdf.setFontSize(10);
-    pdf.setTextColor(100, 116, 139); // slate-500
-    pdf.text(meetingAnalysis.fileName ?? "—", margin, y);
-    y += lineHeight;
-    const dateStr = new Date().toLocaleString("id-ID", {
-      day: "numeric",
-      month: "long",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-    pdf.text(`Tanggal dibuat: ${dateStr}`, margin, y);
-    y += lineHeight;
-
-    pdf.setTextColor(71, 85, 105); // slate-600
-    const leaderText = `Pemimpin: ${meetingAnalysis.data.leader.name}${meetingAnalysis.data.leader.position ? ` — ${meetingAnalysis.data.leader.position}` : ""}`;
-    pdf.text(leaderText, margin, y);
-    y += lineHeight * 1.5;
-
-    const list = meetingAnalysis.data.participants ?? [];
-    for (let i = 0; i < list.length; i++) {
-      const p = list[i];
-      addPageIfNeeded(lineHeight * 15);
-
-      // Participant card header
-      pdf.setDrawColor(226, 232, 240); // slate-200
-      pdf.setLineWidth(0.3);
-      pdf.rect(margin, y - 2, pageW - 2 * margin, 1, "S");
-      y += 4;
-
-      pdf.setFontSize(12);
-      pdf.setTextColor(30, 64, 175);
-      pdf.setFont("helvetica", "bold");
-      pdf.text(p.speaker, margin, y);
-      y += lineHeight;
-
-      if (p.agreement_confidence != null) {
-        pdf.setFont("helvetica", "normal");
-        pdf.setFontSize(9);
-        const conf = p.agreement_confidence;
-        if (conf <= 2) pdf.setTextColor(190, 18, 60);
-        else if (conf <= 3) pdf.setTextColor(180, 83, 9);
-        else pdf.setTextColor(4, 120, 87);
-        pdf.text(`Kesepakatan: ${conf}/5`, margin, y);
-        pdf.setTextColor(0, 0, 0);
-        y += lineHeight;
-      }
-
-      if (p.points?.length) {
-        y += 2;
-        pdf.setFontSize(9);
-        pdf.setTextColor(100, 116, 139);
-        pdf.text("POSISI PER TOPIK", margin, y);
-        y += lineHeight;
-        pdf.setFont("helvetica", "normal");
-        for (const pt of p.points) {
-          const stanceLabel = STANCE_LABELS[pt.stance] ?? pt.stance;
-          const line = `[${stanceLabel}] ${pt.topic}${pt.evidence?.[0] ? ` — "${pt.evidence[0]}"` : ""}`;
-          const wrapped = wrapText(line, maxW - 5);
-          addPageIfNeeded(wrapped.length * lineHeight);
-          pdf.setTextColor(51, 65, 85);
-          pdf.text(wrapped, margin + 3, y);
-          y += wrapped.length * lineHeight;
-        }
-        y += 2;
-      }
-
-      if (p.risks?.length) {
-        pdf.setFontSize(9);
-        pdf.setTextColor(180, 83, 9); // amber-700
-        pdf.text("INDIKATOR RISIKO ALIGNMENT", margin, y);
-        y += lineHeight;
-        pdf.setFont("helvetica", "normal");
-        for (const r of p.risks) {
-          const riskLabel = RISK_LABELS[r.type] ?? r.type;
-          const evStr = r.evidence?.length ? ` — ${r.evidence.map((e) => `"${e}"`).join(", ")}` : "";
-          const line = `${riskLabel} ${(r.score * 100).toFixed(0)}%${evStr}`;
-          const wrapped = wrapText(line, maxW - 5);
-          addPageIfNeeded(wrapped.length * lineHeight);
-          pdf.setTextColor(51, 65, 85);
-          pdf.text(wrapped, margin + 3, y);
-          y += wrapped.length * lineHeight;
-        }
-        y += 2;
-      }
-
-      if (p.summary) {
-        pdf.setDrawColor(241, 245, 249);
-        pdf.setLineWidth(0.2);
-        pdf.line(margin, y, pageW - margin, y);
-        y += lineHeight;
-        pdf.setFontSize(10);
-        pdf.setTextColor(71, 85, 105);
-        pdf.setFont("helvetica", "italic");
-        const wrapped = wrapText(p.summary, maxW);
-        addPageIfNeeded(wrapped.length * lineHeight);
-        pdf.text(wrapped, margin, y);
-        y += wrapped.length * lineHeight;
-        pdf.setFont("helvetica", "normal");
-      }
-
-      y += lineHeight * 1.5;
-    }
-
-    const baseName = (meetingAnalysis.fileName ?? "meeting").replace(/\.[^/.]+$/, "");
-    pdf.save(`${baseName}_analisis_rapat.pdf`);
-  }, [meetingAnalysis]);
-
-  const openMeetingModal = useCallback((item: FileItem) => {
-    setError(null);
-    setMeetingModalState({
-      fileId: item.id,
-      leaderName: "",
-      leaderPosition: "",
-    });
-  }, []);
-
-  const closeMeetingModal = useCallback(() => {
-    setMeetingModalState(null);
-  }, []);
-
-  const handleMeetingSubmit = useCallback(
-    async () => {
-      const state = meetingModalState;
-      if (!state) return;
-      const item = files.find((f) => f.id === state.fileId);
-      if (!item) return;
-      if (!state.leaderName.trim()) {
-        setError("Nama wajib diisi.");
-        return;
-      }
+  const handleSegmentedSummarize = useCallback(
+    async (item: FileItem) => {
       const key = groqApiKey.trim();
       if (!key) {
         setError("Masukkan Groq API key terlebih dahulu. Dapatkan di console.groq.com");
         return;
       }
       setError(null);
-      setMeetingLoading(item.id);
+      setSegmentedLoading(item.id);
+      setSegmentedProgress({ step: 1, stepLabel: "Memulai…", message: "Mempersiapkan…" });
+
+      const controller = new AbortController();
+      segmentedAbortRef.current = controller;
+      const startTime = Date.now();
+
       try {
         const formData = new FormData();
         formData.append("file", item.file);
-        formData.append("leaderName", state.leaderName.trim());
-        formData.append("leaderPosition", state.leaderPosition.trim());
         formData.append("groqApiKey", key);
-        const res = await fetch("/api/summarize-meeting", {
+        if (hfToken.trim()) {
+          formData.append("hfToken", hfToken.trim());
+        }
+        if (leaderName.trim()) {
+          formData.append("leaderName", leaderName.trim());
+          formData.append("leaderPosition", leaderPosition.trim());
+        }
+        const res = await fetch("/api/summarize-segmented", {
           method: "POST",
           body: formData,
+          signal: controller.signal,
         });
-        if (!res.ok) {
-          const data = await res.json().catch(() => ({}));
-          throw new Error(data.error || `Meeting analysis failed: ${res.status}`);
+
+        if (!res.ok || !res.body) {
+          const text = await res.text();
+          let errMsg = `Segmented summarize failed: ${res.status}`;
+          try {
+            const data = JSON.parse(text);
+            if (data?.error) errMsg = data.error;
+          } catch {
+            if (text && text.length < 200) errMsg = text;
+          }
+          throw new Error(errMsg);
         }
-        const data = await res.json();
-        const analysis = data.analysis as MeetingAnalysis;
-        if (!analysis?.participants) {
-          throw new Error("Invalid analysis response.");
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() ?? "";
+
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            try {
+              const data = JSON.parse(line) as {
+                type?: string;
+                step?: number;
+                stepLabel?: string;
+                message?: string;
+                text?: string;
+                diarized?: boolean;
+                device?: string;
+                analysis?: { leader?: { name: string; position: string }; participants: MeetingParticipant[] };
+              };
+              if (data.type === "progress") {
+                setSegmentedProgress({
+                  step: data.step ?? 1,
+                  stepLabel: data.stepLabel ?? "",
+                  message: data.message,
+                });
+              } else if (data.type === "summary") {
+                const elapsed = Math.floor((Date.now() - startTime) / 1000);
+                setSummary({
+                  fileId: item.id,
+                  fileName: item.name,
+                  text: data.text ?? "",
+                  diarized: data.diarized,
+                  device: data.device,
+                  elapsedSeconds: elapsed,
+                });
+              } else if (data.type === "analysis") {
+                setSummary((prev) =>
+                  prev ? { ...prev, analysis: data.analysis } : prev
+                );
+              } else if (data.type === "error") {
+                throw new Error(data.message ?? "Segmented summarization failed.");
+              }
+            } catch (parseErr) {
+              if (parseErr instanceof SyntaxError) continue;
+              throw parseErr;
+            }
+          }
         }
-        setMeetingAnalysis({
-          fileId: item.id,
-          fileName: item.name,
-          data: analysis,
-        });
-        setMeetingModalState(null);
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Meeting analysis failed.");
+        if (err instanceof Error && err.name === "AbortError") {
+          setError("Dibatalkan.");
+        } else if (err instanceof Error && /fetch|network|connection|timeout/i.test(err.message)) {
+          setError("Koneksi terputus atau waktu habis. Coba lagi atau gunakan file audio yang lebih pendek.");
+        } else {
+          setError(err instanceof Error ? err.message : "Segmented summarization failed.");
+        }
       } finally {
-        setMeetingLoading(null);
+        setSegmentedLoading(null);
+        setSegmentedProgress(null);
+        segmentedAbortRef.current = null;
       }
     },
-    [meetingModalState, files, groqApiKey]
+    [groqApiKey, hfToken, leaderName, leaderPosition]
   );
 
   const formatSize = (bytes: number) => {
@@ -746,11 +589,7 @@ export default function Home() {
 
   return (
     <main className="min-h-screen bg-kemenkum-blue py-8 px-4 flex justify-center items-center overflow-y-auto">
-      <div
-        className={`w-full bg-white rounded-lg shadow-lg px-4 sm:px-8 py-10 mx-auto overflow-x-hidden ${
-          meetingAnalysis ? "max-w-4xl" : "max-w-2xl"
-        } text-center`}
-      >
+      <div className="w-full max-w-2xl bg-white rounded-lg shadow-lg px-4 sm:px-8 py-10 mx-auto overflow-x-hidden text-center">
         <div className="flex items-center justify-center gap-3 mb-2">
           <Image src={kemenkumLogo} alt="Kemenkum" width={48} height={48} />
           <h1 className="text-2xl font-bold text-kemenkum-blue">Kemenkum Summarizer</h1>
@@ -784,6 +623,64 @@ export default function Home() {
           </p>
         </div>
 
+        <div className="w-full max-w-md mx-auto mb-6 text-left">
+          <label htmlFor="hf-token" className="block text-sm font-medium text-gray-700 mb-1">
+            Hugging Face Token <span className="text-gray-500">(opsional, disimpan 1 jam)</span>
+          </label>
+          <input
+            id="hf-token"
+            type="password"
+            value={hfToken}
+            onChange={(e) => setHfToken(e.target.value)}
+            placeholder="hf_..."
+            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-gray-900 placeholder-gray-400 focus:border-kemenkum-blue focus:outline-none focus:ring-1 focus:ring-kemenkum-blue"
+          />
+          <p className="mt-1 text-xs text-gray-500">
+            Untuk Segmented Summarize pada audio: klasifikasi pembicara via pyannote. Tanpa token: Groq Whisper (tanpa label pembicara).{" "}
+            <a
+              href="https://huggingface.co/pyannote/speaker-diarization-3.1"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-kemenkum-blue hover:underline"
+            >
+              Terima lisensi pyannote
+            </a>
+          </p>
+        </div>
+
+        <div className="w-full max-w-md mx-auto mb-6 text-left">
+          <p className="block text-sm font-medium text-gray-700 mb-2">
+            Analisis Rapat <span className="text-gray-500">(opsional, untuk Segmented Summarize)</span>
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label htmlFor="leader-name" className="block text-xs text-gray-500 mb-0.5">Nama Anda (leader)</label>
+              <input
+                id="leader-name"
+                type="text"
+                value={leaderName}
+                onChange={(e) => setLeaderName(e.target.value)}
+                placeholder="Contoh: Budi"
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-gray-900 placeholder-gray-400 focus:border-kemenkum-blue focus:outline-none focus:ring-1 focus:ring-kemenkum-blue text-sm"
+              />
+            </div>
+            <div>
+              <label htmlFor="leader-position" className="block text-xs text-gray-500 mb-0.5">Jabatan</label>
+              <input
+                id="leader-position"
+                type="text"
+                value={leaderPosition}
+                onChange={(e) => setLeaderPosition(e.target.value)}
+                placeholder="Contoh: Manajer Proyek"
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-gray-900 placeholder-gray-400 focus:border-kemenkum-blue focus:outline-none focus:ring-1 focus:ring-kemenkum-blue text-sm"
+              />
+            </div>
+          </div>
+          <p className="mt-1 text-xs text-gray-500">
+            Jika diisi, Segmented Summarize akan menambahkan analisis stances (support/oppose/mixed), confidence score, dan bukti (evidence) per peserta.
+          </p>
+        </div>
+
         <div
           onDragEnter={handleDrag}
           onDragLeave={handleDrag}
@@ -813,75 +710,6 @@ export default function Home() {
         {error && (
           <div className="mt-4 p-3 rounded-lg bg-red-50 text-red-700 text-sm text-center" role="alert">
             {error}
-          </div>
-        )}
-
-        {meetingModalState && (
-          <div
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="meeting-modal-title"
-          >
-            <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl">
-              <h2 id="meeting-modal-title" className="text-lg font-semibold text-kemenkum-blue mb-4">
-                Siapa Anda dalam percakapan ini?
-              </h2>
-              <div className="space-y-4">
-                <div>
-                  <label htmlFor="leader-name" className="block text-sm font-medium text-gray-700 mb-1">
-                    Nama Anda *
-                  </label>
-                  <input
-                    id="leader-name"
-                    type="text"
-                    value={meetingModalState.leaderName}
-                    onChange={(e) =>
-                      setMeetingModalState((prev) =>
-                        prev ? { ...prev, leaderName: e.target.value } : null
-                      )
-                    }
-                    placeholder="Contoh: Budi"
-                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-gray-900 focus:border-kemenkum-blue focus:outline-none focus:ring-1 focus:ring-kemenkum-blue"
-                    autoFocus
-                  />
-                </div>
-                <div>
-                  <label htmlFor="leader-position" className="block text-sm font-medium text-gray-700 mb-1">
-                    Posisi / usulan Anda (opsional)
-                  </label>
-                  <input
-                    id="leader-position"
-                    type="text"
-                    value={meetingModalState.leaderPosition}
-                    onChange={(e) =>
-                      setMeetingModalState((prev) =>
-                        prev ? { ...prev, leaderPosition: e.target.value } : null
-                      )
-                    }
-                    placeholder="Contoh: Mendukung opsi A dengan deadline 2 minggu"
-                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-gray-900 focus:border-kemenkum-blue focus:outline-none focus:ring-1 focus:ring-kemenkum-blue"
-                  />
-                </div>
-              </div>
-              <div className="mt-6 flex gap-3 justify-end">
-                <button
-                  type="button"
-                  onClick={closeMeetingModal}
-                  className="px-4 py-2 rounded-lg border border-gray-300 text-gray-600 text-sm font-medium hover:bg-gray-50"
-                >
-                  Batal
-                </button>
-                <button
-                  type="button"
-                  onClick={handleMeetingSubmit}
-                  disabled={!!meetingLoading}
-                  className="px-4 py-2 rounded-lg bg-kemenkum-blue text-white text-sm font-medium hover:opacity-90 disabled:opacity-60"
-                >
-                  {meetingLoading ? "Menganalisis…" : "Lanjutkan"}
-                </button>
-              </div>
-            </div>
           </div>
         )}
 
@@ -996,6 +824,68 @@ export default function Home() {
                         )}
                     </div>
                   )}
+                  {segmentedLoading === item.id && segmentedProgress && (
+                    <div className="w-full min-w-0">
+                      <div className="p-4 rounded-xl bg-gradient-to-br from-slate-50 to-blue-50 border border-slate-200">
+                        <div className="flex items-center gap-3 mb-3">
+                          <div className="w-10 h-10 rounded-full bg-kemenkum-blue/20 flex items-center justify-center animate-pulse">
+                            <span className="text-xl" aria-hidden>📋</span>
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="font-medium text-slate-800 truncate">
+                              {segmentedProgress.message ?? "Memproses segmented…"}
+                            </p>
+                            <p className="text-xs text-slate-500">
+                              Langkah {segmentedProgress.step}/{leaderName.trim() ? 4 : 3} • {segmentedElapsedSeconds}s
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex gap-2 mb-2 flex-wrap">
+                          {(leaderName.trim()
+                            ? ["Ekstraksi", "Cek format", "Rangkuman", "Analisis rapat"]
+                            : ["Ekstraksi", "Cek format", "Rangkuman"]
+                          ).map((label, i) => {
+                            const stepNum = i + 1;
+                            const isDone = (segmentedProgress.step ?? 1) > stepNum;
+                            const isActive = (segmentedProgress.step ?? 1) === stepNum;
+                            return (
+                              <span
+                                key={label}
+                                className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${
+                                  isDone
+                                    ? "bg-emerald-100 text-emerald-800"
+                                    : isActive
+                                      ? "bg-kemenkum-blue/20 text-kemenkum-blue ring-1 ring-kemenkum-blue/30"
+                                      : "bg-slate-100 text-slate-500"
+                                }`}
+                              >
+                                {stepNum}. {label}
+                                {isDone && " ✓"}
+                              </span>
+                            );
+                          })}
+                        </div>
+                        <div className="h-1.5 bg-slate-200 rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-kemenkum-blue transition-all duration-300"
+                            style={{
+                              width: `${Math.min(100, ((segmentedProgress.step ?? 1) / (leaderName.trim() ? 4 : 3)) * 100)}%`,
+                            }}
+                          />
+                        </div>
+                        <p className="text-xs text-slate-500 mt-2 italic">
+                          {segmentedProgress.step === 1 && "Mengekstrak teks atau mengidentifikasi pembicara…"}
+                          {segmentedProgress.step === 2 && "Memeriksa apakah teks memiliki format label dan opini…"}
+                          {segmentedProgress.step === 3 && "Merangkum setiap segmen secara terpisah…"}
+                          {segmentedProgress.step === 4 && "Menganalisis stances dan risiko alignment…"}
+                        </p>
+                        <p className="text-xs text-slate-600 mt-1.5 flex items-start gap-1.5">
+                          <span className="text-amber-500 shrink-0" aria-hidden>💡</span>
+                          <span>{SEGMENTED_TIPS[segmentedTipIndex]}</span>
+                        </p>
+                      </div>
+                    </div>
+                  )}
                   <div className="flex flex-wrap items-center gap-2 justify-end min-w-0">
                     <button
                       type="button"
@@ -1016,12 +906,21 @@ export default function Home() {
                     )}
                     <button
                       type="button"
-                      onClick={() => openMeetingModal(item)}
-                      disabled={!!meetingLoading}
-                      className="px-4 py-2 rounded-lg bg-kemenkum-blue text-white text-sm font-medium hover:opacity-90 disabled:opacity-60 whitespace-nowrap"
+                      onClick={() => handleSegmentedSummarize(item)}
+                      disabled={!!segmentedLoading}
+                      className="px-4 py-2 rounded-lg border border-kemenkum-blue text-kemenkum-blue bg-white text-sm font-medium hover:bg-kemenkum-blue/5 disabled:opacity-60 whitespace-nowrap"
                     >
-                      {meetingLoading === item.id ? "Analyzing…" : "Summarize Meeting"}
+                      {segmentedLoading === item.id ? "Processing…" : "Segmented Summarize"}
                     </button>
+                    {segmentedLoading === item.id && (
+                      <button
+                        type="button"
+                        onClick={cancelSegmented}
+                        className="px-4 py-2 rounded-lg border border-rose-300 text-rose-700 text-sm font-medium hover:bg-rose-50 whitespace-nowrap"
+                      >
+                        Batalkan
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={() => removeFile(item.id)}
@@ -1072,19 +971,107 @@ export default function Home() {
                 </button>
               </div>
             </div>
+            {summary.elapsedSeconds != null && (
+              <p className="text-sm text-gray-500 mb-2 text-left">
+                Proses selesai dalam {formatProcessTime(summary.elapsedSeconds)}.
+              </p>
+            )}
+            {summary.diarized !== undefined && (
+              <p className="text-sm text-gray-600 mb-2 text-left">
+                {summary.diarized
+                  ? `Menggunakan pyannote (diarisasi pembicara). Rangkuman per pembicara.${summary.device ? ` [${summary.device === "cuda" ? "GPU (CUDA)" : "CPU"}]` : ""}`
+                  : "Menggunakan Groq Whisper (tanpa label pembicara). Rangkuman mungkin berdasarkan topik."}
+              </p>
+            )}
+            {summary.analysis && (
+              <div className="w-full mb-4 p-4 rounded-lg border border-kemenkum-blue/30 bg-blue-50/50 text-gray-900 text-left overflow-y-auto max-h-[400px]">
+                <h3 className="text-base font-semibold text-kemenkum-blue mb-3">Analisis Rapat</h3>
+                {summary.analysis.leader && (
+                  <p className="text-sm text-gray-600 mb-3">
+                    Leader: <strong>{summary.analysis.leader.name}</strong>
+                    {summary.analysis.leader.position && ` (${summary.analysis.leader.position})`}
+                  </p>
+                )}
+                <div className="space-y-4">
+                  {summary.analysis.participants.map((p) => (
+                    <div key={p.speaker} className="border border-gray-200 rounded-lg p-3 bg-white">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="font-medium text-gray-900">{p.speaker}</span>
+                        {p.agreement_confidence != null && (
+                          <span
+                            className={`text-xs px-2 py-0.5 rounded ${
+                              p.agreement_confidence >= 4
+                                ? "bg-emerald-100 text-emerald-800"
+                                : p.agreement_confidence <= 2
+                                  ? "bg-rose-100 text-rose-800"
+                                  : "bg-amber-100 text-amber-800"
+                            }`}
+                          >
+                            Confidence: {p.agreement_confidence}/5
+                          </span>
+                        )}
+                      </div>
+                      {p.summary && (
+                        <p className="text-sm text-gray-600 mb-2">{p.summary}</p>
+                      )}
+                      {p.points && p.points.length > 0 && (
+                        <div className="mb-2">
+                          <p className="text-xs font-medium text-gray-500 mb-1">Poin:</p>
+                          <ul className="text-sm space-y-1">
+                            {p.points.map((pt, i) => (
+                              <li key={i}>
+                                <span
+                                  className={`inline-block px-1.5 py-0.5 rounded text-xs mr-1 ${
+                                    pt.stance === "support"
+                                      ? "bg-emerald-100 text-emerald-800"
+                                      : pt.stance === "oppose"
+                                        ? "bg-rose-100 text-rose-800"
+                                        : "bg-amber-100 text-amber-800"
+                                  }`}
+                                >
+                                  {pt.stance}
+                                </span>
+                                {pt.topic}
+                                {pt.evidence && pt.evidence.length > 0 && (
+                                  <span className="text-gray-500 text-xs block mt-0.5">
+                                    Bukti: &quot;{pt.evidence[0]}
+                                    {pt.evidence.length > 1 ? `" +${pt.evidence.length - 1}` : '"'}
+                                  </span>
+                                )}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                      {p.risks && p.risks.length > 0 && (
+                        <div>
+                          <p className="text-xs font-medium text-gray-500 mb-1">Risiko:</p>
+                          <ul className="text-sm space-y-1">
+                            {p.risks.map((r, i) => (
+                              <li key={i}>
+                                <span className="text-rose-600 font-medium">{r.type}</span>
+                                <span className="text-gray-500 text-xs"> (score: {r.score.toFixed(1)})</span>
+                                {r.evidence && r.evidence[0] && (
+                                  <span className="text-gray-500 text-xs block">
+                                    &quot;{r.evidence[0]}&quot;
+                                  </span>
+                                )}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
             <div className="w-full p-4 rounded-lg border border-gray-200 bg-gray-50 text-gray-900 text-left min-h-[200px] max-h-[400px] overflow-y-auto [&_h1]:text-xl [&_h1]:font-bold [&_h1]:mt-2 [&_h1]:mb-1 [&_h2]:text-lg [&_h2]:font-semibold [&_h2]:mt-3 [&_h2]:mb-1 [&_h3]:text-base [&_h3]:font-medium [&_h3]:mt-2 [&_h3]:mb-1 [&_p]:mb-2 [&_ul]:list-disc [&_ul]:pl-6 [&_ul]:mb-2 [&_ol]:list-decimal [&_ol]:pl-6 [&_ol]:mb-2 [&_li]:mb-0.5 [&_strong]:font-semibold">
               <ReactMarkdown>{summary.text}</ReactMarkdown>
             </div>
           </section>
         )}
 
-        {meetingAnalysis && (
-          <MeetingAnalysisDisplay
-            fileName={meetingAnalysis.fileName}
-            data={meetingAnalysis.data}
-            onExportPdf={exportMeetingToPdf}
-          />
-        )}
       </div>
     </main>
   );

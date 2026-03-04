@@ -141,6 +141,7 @@ const SUMMARIZE_PROMPT = `Anda adalah asisten yang merangkum dokumen. Aturan:
 PENTING - TENTUKAN JENIS DOKUMEN DULU:
 - Format RAPAT/NOTULA untuk: (a) dokumen rapat resmi dengan peserta, jalannya rapat, diskusi; atau (b) transkrip pertemuan/paparan (mis. pertemuan dengan pejabat, diskusi, paparan hasil).
 - Jangan gunakan format rapat untuk: buku, artikel, transkrip podcast/video umum yang bukan pertemuan, pedoman. Gunakan format "Dokumen Bukan Rapat".
+- PEDOMAN/PANDUAN/PERATURAN: Selalu format Dokumen Bukan Rapat. Pedoman adalah dokumen panduan/prosedur, BUKAN transkrip rapat. Meskipun dokumen menyebut "rapat" atau "pertemuan", tetap gunakan format **Rangkuman :** dengan daftar bernomor. JANGAN format Metadata, Peserta Rapat, Acara, Jalannya Rapat.
 
 UNTUK DOKUMEN RAPAT/NOTULA/PERTEMUAN:
 Gunakan format terstruktur dengan MARKDOWN:
@@ -179,16 +180,20 @@ Ringkasan poin penutup. Boleh tambahkan insight Anda sendiri: analisis, rekomend
 Notulis, Ketua Tim.
 
 UNTUK DOKUMEN BUKAN RAPAT (buku, artikel, pedoman, transkrip podcast/video):
-- Awali dengan kalimat deskripsi: "Dokumen ini berisi hal tentang [topik utama]."
-- Lanjutkan dengan poin-poin penting secara ringkas.
+- EKSTRAK isi konkret dari dokumen. Jangan hanya mendeskripsikan dokumen. Hindari kalimat meta seperti "Dokumen ini merupakan...", "Tujuan dari dokumen ini adalah...". Fokus pada aturan, prosedur, persyaratan, dan poin spesifik yang tertulis.
+- Setiap poin harus berisi informasi spesifik dari dokumen, bukan ringkasan umum tentang jenis dokumen.
+- Untuk pedoman: ekstrak prosedur, aturan, langkah-langkah, persyaratan yang tertulis. Jangan gunakan struktur Latar Belakang/Tujuan/Kerangka Kerja jika itu hanya deskripsi umum.
+- Gunakan format daftar bernomor (1., 2., 3.) untuk poin utama.
+- Gunakan sub-poin dengan indentasi (2–4 spasi sebelum "- ") untuk rincian.
+- Awali dengan **Rangkuman :** lalu daftar bernomor.
 - Berikan contoh konkret dari dokumen. Jangan hanya kesimpulan abstrak.
 - JANGAN gunakan format notula (Metadata, Peserta Rapat, Acara, dll.) untuk dokumen ini.
 - Variasikan frasa: jangan ulangi "penulis berpendapat" berkali-kali; gunakan "menurut penulis", "penulis menyatakan", "penulis mengemukakan", dll.
 - Paragraf kesimpulan tidak boleh mengulang pembukaan; fokus pada ringkasan atau poin penutup yang baru. Boleh tambahkan insight Anda sendiri (analisis, rekomendasi, observasi) yang relevan dengan dokumen.
-- KONSOLIDASI: Gabungkan poin yang mirip menjadi satu paragraf. Jangan ulangi ide yang sama di paragraf berbeda.
-- Untuk dokumen pendek: batasi 3–4 paragraf; setiap poin utama hanya disebut satu kali.
+- KONSOLIDASI: Gabungkan poin yang mirip menjadi satu poin. Jangan ulangi ide yang sama.
 
 ATURAN UMUM:
+- RANGKUMAN vs DESKRIPSI: Rangkum ISI dokumen (aturan, prosedur, poin penting). Jangan hanya mendeskripsikan jenis dokumen atau tujuannya.
 - DEDUPLIKASI: Poin yang sama atau mirip hanya perlu disebut SATU KALI. Hindari pengulangan ide.
 - Hindari kata "juga" di awal atau akhir kalimat. Variasikan struktur kalimat.
 - Perbaiki typo umum (mis. "menafigasi" → "menavigasi").
@@ -203,7 +208,8 @@ Dokumen:
 const SUMMARIZE_CHUNK_PROMPT = `Rangkum bagian berikut secara ringkas dalam Bahasa Indonesia.
 - Fokus pada poin-poin penting dan UNIK. Poin yang sama hanya disebut SATU KALI. Gabungkan ide mirip; jangan ulangi di paragraf berbeda.
 - Jika bagian ini dari notula/pertemuan (ada peserta, jalannya rapat, diskusi): PERTAHANKAN nama orang, organisasi/unit, detail teknis. Gunakan format: daftar bernomor (1., 2.) dan sub-list huruf (a., b., c.). Bold (**) untuk nama orang, organisasi, istilah teknis.
-- Jika bagian ini dari buku/artikel/podcast: rangkum sebagai poin-poin biasa, jangan paksakan format notula. Variasikan frasa (jangan ulangi "penulis berpendapat" berkali-kali).
+- Jika bagian ini dari buku/artikel/podcast: ekstrak poin spesifik dari konten. Rangkum sebagai daftar bernomor (1., 2.) dengan sub-poin (indent 2–4 spasi sebelum "- ") bila ada rincian. Jangan hanya deskripsi umum. Variasikan frasa (jangan ulangi "penulis berpendapat" berkali-kali).
+- Jika bagian ini dari pedoman, panduan, peraturan, prosedur: ekstrak aturan, prosedur, langkah-langkah, persyaratan yang tertulis. SELALU rangkum sebagai daftar bernomor (bukan format notula). Hindari "Dokumen ini merupakan...", "Tujuan dari dokumen ini...". Pedoman bukan transkrip rapat.
 - Hindari kata "juga" di awal atau akhir kalimat. Variasikan struktur kalimat.
 - Perbaiki typo umum (mis. "menafigasi" → "menavigasi").
 - Tanpa pembukaan, langsung rangkuman saja. Pastikan kalimat terakhir selesai lengkap.
@@ -217,7 +223,8 @@ const SUMMARIZE_MERGE_PROMPT = `Gabungkan rangkuman berikut menjadi satu rangkum
 ATURAN PENTING:
 - DEDUPLIKASI: Poin yang sama atau mirip hanya perlu disebut SATU KALI. Gabungkan ide mirip menjadi satu paragraf; jangan ulangi di paragraf berbeda.
 - Format RAPAT/NOTULA hanya jika rangkuman per bagian JELAS berisi rapat/pertemuan (peserta, jalannya rapat, diskusi). Gabungkan ke format terstruktur dengan MARKDOWN: **bold** untuk heading dan istilah penting, daftar bernomor (1., 2.) dan sub-list huruf (a., b., c.). Pertahankan nama orang dan detail teknis. Untuk **Kesimpulan**: boleh tambahkan insight Anda sendiri (analisis, rekomendasi, observasi) yang relevan.
-- Jika rangkuman berisi buku/artikel/podcast (tidak ada peserta rapat, jalannya rapat): JANGAN gunakan format notula. Awali dengan kalimat deskripsi singkat tentang topik utama, lalu poin-poin penting (tanpa duplikat). Paragraf kesimpulan jangan mengulang pembukaan; boleh tambahkan insight Anda sendiri (analisis, rekomendasi). Batasi 3–4 paragraf untuk dokumen pendek.
+- Jika rangkuman berisi buku/artikel/podcast (tidak ada peserta rapat, jalannya rapat): JANGAN gunakan format notula. Gunakan format **Rangkuman :** diikuti daftar bernomor (1., 2., 3.) dengan sub-poin (indent 2–4 spasi sebelum "- ") bila ada rincian. Pastikan poin berisi konten spesifik, bukan deskripsi umum. Tanpa duplikat. Boleh tambahkan insight Anda sendiri di poin terakhir.
+- Jika rangkuman berisi pedoman, panduan, peraturan: SELALU format **Rangkuman :** dengan daftar bernomor. Ekstrak aturan, prosedur, persyaratan konkret. JANGAN format notula. JANGAN struktur Latar Belakang/Tujuan/Kerangka Kerja yang hanya deskripsi. Pedoman bukan transkrip rapat.
 - Hindari kata "juga" di awal atau akhir kalimat. Variasikan kata penghubung dan frasa (selain itu, selanjutnya, menurut penulis, dll.) - jangan gunakan "penulis berpendapat" berulang kali.
 - Perbaiki typo umum (mis. "menafigasi" → "menavigasi").
 - Pastikan rangkuman selesai LENGKAP; jangan potong di tengah kalimat atau paragraf.

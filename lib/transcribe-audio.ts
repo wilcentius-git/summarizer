@@ -1,7 +1,7 @@
 /**
  * Groq Whisper speech-to-text transcription.
  * Supports MP3, WAV, M4A, WebM, FLAC, OGG, MP4, MPEG, MPGA.
- * Long audio is chunked to avoid 524 timeout; retries on timeout.
+ * Long audio is chunked to avoid 524 timeout; retries on 524 and 429 (rate limit).
  */
 
 import { chunkAudioBuffer } from "@/lib/audio-chunking";
@@ -70,14 +70,30 @@ export function resolveAudioMimeType(mimeType: string, fileName?: string): strin
 
 const WHISPER_RETRY_ATTEMPTS = 3;
 const WHISPER_RETRY_DELAY_MS = 5000;
+/** Extra retries for 429 rate limit (API suggests wait time). */
+const WHISPER_RATE_LIMIT_RETRY_ATTEMPTS = 5;
+/** Delay between transcription chunks to avoid bursting rate limits. */
+export const TRANSCRIBE_CHUNK_DELAY_MS = 3000;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+/** Parse "Please try again in 58.5s" from Groq error body. Returns ms or null. */
+function parseRetryAfterMs(errBody: string, res?: Response): number | null {
+  const header = res?.headers?.get?.("Retry-After");
+  if (header) {
+    const sec = parseInt(header, 10);
+    if (!isNaN(sec)) return sec * 1000;
+  }
+  const match = errBody.match(/try again in (\d+(?:\.\d+)?)\s*s/i);
+  if (match) return Math.ceil(parseFloat(match[1]) * 1000);
+  return null;
+}
+
 /**
  * Transcribe a single audio buffer using Groq Whisper API.
- * Retries on 524 (Cloudflare timeout).
+ * Retries on 524 (Cloudflare timeout) and 429 (rate limit), using API-suggested wait time for 429.
  */
 async function transcribeSingleChunk(
   buffer: Buffer,
@@ -103,7 +119,8 @@ async function transcribeSingleChunk(
   }
 
   let lastError: Error | null = null;
-  for (let attempt = 0; attempt <= WHISPER_RETRY_ATTEMPTS; attempt++) {
+  const maxAttempts = Math.max(WHISPER_RETRY_ATTEMPTS, WHISPER_RATE_LIMIT_RETRY_ATTEMPTS);
+  for (let attempt = 0; attempt <= maxAttempts; attempt++) {
     try {
       const res = await fetch(GROQ_TRANSCRIPTION_URL, {
         method: "POST",
@@ -120,8 +137,15 @@ async function transcribeSingleChunk(
       const errBody = await res.text();
       lastError = new Error(`Groq Whisper error: ${res.status}. ${errBody}`);
 
-      if (res.status === 524 && attempt < WHISPER_RETRY_ATTEMPTS) {
-        await sleep(WHISPER_RETRY_DELAY_MS);
+      const maxRetries =
+        res.status === 429 ? WHISPER_RATE_LIMIT_RETRY_ATTEMPTS : WHISPER_RETRY_ATTEMPTS;
+      if ((res.status === 524 || res.status === 429) && attempt < maxRetries) {
+        let delayMs = WHISPER_RETRY_DELAY_MS;
+        if (res.status === 429) {
+          const parsed = parseRetryAfterMs(errBody, res);
+          if (parsed) delayMs = parsed;
+        }
+        await sleep(delayMs);
         continue;
       }
       throw lastError;
@@ -132,7 +156,7 @@ async function transcribeSingleChunk(
           (/fetch|ECONNRESET|ECONNREFUSED|ETIMEDOUT|socket hang up/i.test(err.message) ||
             (err as Error & { cause?: Error }).cause?.message?.includes("ECONNRESET")));
       lastError = err instanceof Error ? err : new Error(String(err));
-      if (isRetryable && attempt < WHISPER_RETRY_ATTEMPTS) {
+      if (isRetryable && attempt < maxAttempts) {
         await sleep(WHISPER_RETRY_DELAY_MS);
         continue;
       }
@@ -179,6 +203,7 @@ export async function transcribeWithGroq(
     const transcripts: string[] = [];
     const total = chunks.length;
     for (let i = 0; i < chunks.length; i++) {
+      if (i > 0) await sleep(TRANSCRIBE_CHUNK_DELAY_MS);
       options?.onChunkProgress?.(i + 1, total);
       const chunk = chunks[i];
       const chunkFileName =

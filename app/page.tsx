@@ -115,6 +115,16 @@ function estimateAudioTranscribeSeconds(fileSizeBytes: number): number {
   return Math.max(30, Math.ceil(mb) * 7);
 }
 
+/** Normalize text to prevent overlapping: \r causes overwrite; remove control chars. */
+function sanitizeSummaryText(s: string): string {
+  if (!s) return s;
+  return s
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, "")
+    .replace(/\n{3,}/g, "\n\n");
+}
+
 function formatProcessTime(seconds: number): string {
   if (seconds < 60) return `${seconds} seconds`;
   if (seconds < 3600) return `${(seconds / 60).toFixed(1)} minutes`;
@@ -351,7 +361,7 @@ export default function Home() {
                 setSummary({
                   fileId: item.id,
                   fileName: item.name,
-                  text: data.text ?? "",
+                  text: sanitizeSummaryText(data.text ?? ""),
                   elapsedSeconds: elapsed,
                 });
               } else if (data.type === "error") {
@@ -386,14 +396,6 @@ export default function Home() {
 
   const exportToPdf = useCallback(async () => {
     if (!summary?.text) return;
-    const { jsPDF } = await import("jspdf");
-    const pdf = new jsPDF({ unit: "mm", format: "a4", orientation: "portrait" });
-    const margin = 15;
-    const pageW = pdf.internal.pageSize.getWidth();
-    const pageH = pdf.internal.pageSize.getHeight();
-    const maxW = pageW - 2 * margin;
-    const lineHeight = 6;
-    let y = margin;
 
     const dateStr = new Date().toLocaleString("id-ID", {
       day: "numeric",
@@ -403,68 +405,66 @@ export default function Home() {
       minute: "2-digit",
     });
 
-    pdf.setFontSize(10);
-    pdf.setTextColor(100, 100, 100);
-    pdf.text(`Dokumen: ${summary.fileName ?? "—"}`, margin, y);
-    y += lineHeight;
-    pdf.text(`Tanggal dibuat: ${dateStr}`, margin, y);
-    y += lineHeight * 1.5;
-    pdf.setTextColor(0, 0, 0);
-    pdf.setFontSize(11);
-
-    /** Strip markdown except **bold** (we preserve bold for PDF rendering). */
-    const stripMarkdownExceptBold = (s: string) =>
+    /** Strip markdown for PDF output; preserve numbered list (1., 2., 3.). */
+    const stripMarkdown = (s: string) =>
       s
-        .replace(/\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, "$1")
+        .replace(/\*\*(.+?)\*\*/g, "$1")
+        .replace(/\*(.+?)\*/g, "$1")
         .replace(/^#+\s*/gm, "")
-        .replace(/^\s*[-*]\s+/gm, "• ")
-        .replace(/^\s*\d+\.\s+/gm, "");
+        .replace(/^(\s*)[-*]\s+/gm, "$1• ");
 
-    const addPageIfNeeded = (needed: number) => {
-      if (y + needed > pageH - margin) {
-        pdf.addPage();
-        y = margin;
-      }
-    };
+    /** Fix overlapping: \r (carriage return) can cause overwriting; normalize to \n. */
+    const sanitizeForPdf = (s: string) =>
+      s
+        .replace(/\r\n/g, "\n")
+        .replace(/\r/g, "\n")
+        .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, "")
+        .replace(/\n{3,}/g, "\n\n");
 
-    const lines = stripMarkdownExceptBold(summary.text).split(/\r?\n/);
-    pdf.setFontSize(11);
+    const content = sanitizeForPdf(stripMarkdown(summary.text));
+    const baseName =
+      summary.fileName?.replace(/\.[^.]+$/, "") ?? "document";
+    const fileName = `${baseName}-summary.pdf`;
 
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed) {
-        y += lineHeight * 0.5;
-        continue;
-      }
+    try {
+      const { jsPDF } = await import("jspdf");
+      const doc = new jsPDF({ unit: "mm", format: "a4" });
+      const margin = 20;
+      const maxWidth = 210 - margin * 2;
+      const lineHeight = 6;
+      const pageHeight = 297;
+      const maxY = pageHeight - margin;
 
-      const parts = trimmed.split(/\*\*(.+?)\*\*/g);
-      let x = margin;
+      let y = margin;
 
-      for (let i = 0; i < parts.length; i++) {
-        const text = parts[i];
-        if (!text) continue;
-        const isBold = i % 2 === 1;
-        pdf.setFont("helvetica", isBold ? "bold" : "normal");
-
-        const remainingW = Math.max(maxW - (x - margin), 1);
-        const wrapped = pdf.splitTextToSize(text, remainingW);
-
-        for (let j = 0; j < wrapped.length; j++) {
-          addPageIfNeeded(lineHeight);
-          if (j > 0) {
-            x = margin;
-            y += lineHeight;
+      const addText = (text: string, fontSize = 11) => {
+        doc.setFontSize(fontSize);
+        const lines = doc.splitTextToSize(text, maxWidth);
+        for (const line of lines) {
+          if (y > maxY) {
+            doc.addPage();
+            y = margin;
           }
-          const subline = wrapped[j];
-          pdf.text(subline, x, y);
-          x = margin + pdf.getTextWidth(subline);
+          doc.text(line, margin, y);
+          y += lineHeight;
         }
-      }
-      y += lineHeight;
-    }
+      };
 
-    const baseName = (summary.fileName ?? "document").replace(/\.[^/.]+$/, "");
-    pdf.save(`${baseName}_summary.pdf`);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10);
+      doc.setTextColor(100, 100, 100);
+      addText(`Dokumen: ${summary.fileName ?? "—"}`, 10);
+      addText(`Tanggal dibuat: ${dateStr}`, 10);
+      y += 4;
+      doc.setTextColor(0, 0, 0);
+      doc.setFontSize(11);
+      addText(content);
+
+      doc.save(fileName);
+    } catch (err) {
+      setError("Gagal mendownload PDF. Coba lagi.");
+      console.error(err);
+    }
   }, [summary?.text, summary?.fileName]);
 
   const handleSegmentedSummarize = useCallback(
@@ -546,7 +546,7 @@ export default function Home() {
                 setSummary({
                   fileId: item.id,
                   fileName: item.name,
-                  text: data.text ?? "",
+                  text: sanitizeSummaryText(data.text ?? ""),
                   diarized: data.diarized,
                   device: data.device,
                   elapsedSeconds: elapsed,

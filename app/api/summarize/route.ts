@@ -202,7 +202,7 @@ export async function POST(request: NextRequest) {
             const part = await summarizeWithGroq(chunks[i], apiKey, {
               isChunk: true,
             });
-            chunkSummaries.push(`[Bagian ${i + 1}]\n${part}`);
+            chunkSummaries.push(part);
             send({
               type: "progress",
               phase: "chunks",

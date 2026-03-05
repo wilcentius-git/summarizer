@@ -65,31 +65,33 @@ Teks:
 
 `;
 
-const SEGMENTED_SUMMARIZE_PROMPT = `Teks berikut memiliki format label dan opini (transkrip percakapan dengan pembicara). Tugas Anda:
-
-1. Identifikasi TOPIK-TOPIK yang dibahas dalam percakapan.
-2. Untuk setiap topik, rangkum opini tiap pembicara dan beri label STANCE mereka terhadap pembicara lain atau gagasan yang dibahas:
-   - **pro**: mendukung, setuju, memuji, atau menyetujui
-   - **con**: menentang, tidak setuju, mengkritik, atau menolak
-   - **performative**: netral, formal, sopan, atau lebih bersifat pertunjukan/tidak menunjukkan posisi jelas
+const SEGMENTED_SUMMARIZE_PROMPT = `Teks berikut memiliki format label dan opini (transkrip percakapan dengan pembicara). Tugas Anda: rangkum dalam format daftar bernomor kronologis, singkat dan padat.
 
 Format output (WAJIB ikuti):
-**Topik: [nama topik]**
-- [Label pembicara]: [Rangkuman opini] — [pro/con/performative]
-- [Label pembicara]: [Rangkuman opini] — [pro/con/performative]
-
-**Topik: [topik berikutnya]**
-- ...
+**Rangkuman :**
+1. [Poin pertama sesuai urutan kronologis]
+2. [Poin kedua]
+3. [Poin ketiga]
+... (lanjutkan dengan nomor berurutan)
 
 Aturan:
-- Kelompokkan per topik, bukan per pembicara.
-- Setiap pembicara yang berpendapat tentang topik tersebut harus dicantumkan dengan opini ringkas dan stance.
-- Pisahkan setiap topik dengan baris kosong.
-- Tanpa pembukaan lain, langsung rangkuman per topik.
+- Gunakan sudut pandang orang ketiga (mis. "Pembicara menjelaskan...", "Peserta menyatakan..."). Jangan gunakan "saya", "kita", atau "anda".
+- Urutkan poin sesuai kronologi kejadian (dari awal hingga akhir percakapan).
+- FOKUS PADA INTI: Rangkum hanya poin penting dan esensial. Maksimal 8–10 poin utama. Setiap poin 1 kalimat singkat.
+- Hindari pengulangan. Gabungkan poin serupa. DEDUPLIKASI: Poin yang sama hanya disebut SATU KALI.
+- Gunakan **bold** untuk nama orang, organisasi, istilah teknis.
+- Sub-poin: hanya jika benar-benar penting, gunakan 4 spasi sebelum "- ". Maksimal 1 sub-poin per poin utama.
+- Tanpa pembukaan lain, langsung **Rangkuman :** diikuti daftar bernomor.
 
 Teks:
 
 `;
+
+/** Ensures sub-bullets (• or -) have 4 spaces before them for PDF indentation. */
+function ensureSubBulletIndentation(text: string): string {
+  if (!text) return text;
+  return text.replace(/^(\s{0,3})([-•]\s+)/gm, "    $2");
+}
 
 function runDiarizeScript(
   audioPath: string,
@@ -252,7 +254,8 @@ async function checkFormatAndSummarize(text: string, apiKey: string, send?: (obj
     }
   }
 
-  const summary = fixCommonTypos(summaries.join("\n\n") || "Rangkuman tidak dapat dibuat.");
+  let summary = fixCommonTypos(summaries.join("\n\n") || "Rangkuman tidak dapat dibuat.");
+  summary = ensureSubBulletIndentation(summary);
   return { summary };
 }
 

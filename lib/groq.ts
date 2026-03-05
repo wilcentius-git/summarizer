@@ -193,8 +193,11 @@ UNTUK DOKUMEN BUKAN RAPAT (buku, artikel, pedoman, transkrip podcast/video):
 - KONSOLIDASI: Gabungkan poin yang mirip menjadi satu poin. Jangan ulangi ide yang sama.
 
 ATURAN UMUM:
+- FORMAT WAJIB: daftar bernomor ketat (1., 2., 3., ...). Sub-poin hanya jika perlu (4 spasi sebelum "- " atau "a.", "b.").
+- Di AKHIR rangkuman, WAJIB tambahkan **Kesimpulan:** diikuti 2–4 kalimat ringkasan singkat yang mensintesis poin utama. Jangan ulangi poin satu per satu.
 - RANGKUMAN vs DESKRIPSI: Rangkum ISI dokumen (aturan, prosedur, poin penting). Jangan hanya mendeskripsikan jenis dokumen atau tujuannya.
 - DEDUPLIKASI: Poin yang sama atau mirip hanya perlu disebut SATU KALI. Hindari pengulangan ide.
+- JANGAN SERTAKAN (konten tidak substantif): ucapan terima kasih, salam penutup, ajakan menonton/berlangganan; preferensi pribadi yang tidak terkait kebijakan; pengulangan poin yang sama tanpa informasi baru.
 - Hindari kata "juga" di awal atau akhir kalimat. Variasikan struktur kalimat.
 - Perbaiki typo umum (mis. "menafigasi" → "menavigasi").
 - Gunakan konten dari SEMUA halaman dokumen. Jangan hanya merangkum halaman terakhir.
@@ -206,13 +209,23 @@ Dokumen:
 `;
 
 const SUMMARIZE_CHUNK_PROMPT = `Rangkum bagian berikut secara ringkas dalam Bahasa Indonesia.
-- Fokus pada poin-poin penting dan UNIK. Poin yang sama hanya disebut SATU KALI. Gabungkan ide mirip; jangan ulangi di paragraf berbeda.
-- Jika bagian ini dari notula/pertemuan (ada peserta, jalannya rapat, diskusi): PERTAHANKAN nama orang, organisasi/unit, detail teknis. Gunakan format: daftar bernomor (1., 2.) dan sub-list huruf (a., b., c.). Bold (**) untuk nama orang, organisasi, istilah teknis.
-- Jika bagian ini dari buku/artikel/podcast: ekstrak poin spesifik dari konten. Rangkum sebagai daftar bernomor (1., 2.) dengan sub-poin (indent 2–4 spasi sebelum "- ") bila ada rincian. Jangan hanya deskripsi umum. Variasikan frasa (jangan ulangi "penulis berpendapat" berkali-kali).
-- Jika bagian ini dari pedoman, panduan, peraturan, prosedur: ekstrak aturan, prosedur, langkah-langkah, persyaratan yang tertulis. SELALU rangkum sebagai daftar bernomor (bukan format notula). Hindari "Dokumen ini merupakan...", "Tujuan dari dokumen ini...". Pedoman bukan transkrip rapat.
-- Hindari kata "juga" di awal atau akhir kalimat. Variasikan struktur kalimat.
-- Perbaiki typo umum (mis. "menafigasi" → "menavigasi").
-- Tanpa pembukaan, langsung rangkuman saja. Pastikan kalimat terakhir selesai lengkap.
+
+FORMAT WAJIB:
+- Output HANYA daftar bernomor ketat (1., 2., 3., ...). Jangan gunakan heading "Bagian X" atau "Bagian 1:".
+- Sub-poin hanya jika perlu: gunakan 4 spasi sebelum "- " atau "a.", "b.", "c.".
+- Bold (**) untuk nama orang, organisasi, istilah teknis.
+
+- Fokus pada poin-poin penting dan UNIK. Poin yang sama hanya disebut SATU KALI. Gabungkan ide mirip.
+- Jika notula/pertemuan: PERTAHANKAN nama orang, organisasi/unit, detail teknis.
+- Jika buku/artikel/podcast: ekstrak poin spesifik. Variasikan frasa (jangan ulangi "penulis berpendapat" berkali-kali).
+- Jika pedoman/peraturan: ekstrak aturan, prosedur, persyaratan. Hindari "Dokumen ini merupakan...".
+- Hindari kata "juga" di awal atau akhir kalimat. Perbaiki typo umum.
+- Tanpa pembukaan, langsung daftar bernomor saja. Pastikan kalimat terakhir selesai lengkap.
+
+JANGAN SERTAKAN (konten tidak substantif):
+- Ucapan terima kasih, salam penutup, ajakan menonton/berlangganan.
+- Preferensi pribadi yang tidak terkait kebijakan atau keputusan.
+- Pengulangan poin yang sama tanpa informasi baru.
 
 Bagian:
 
@@ -220,15 +233,24 @@ Bagian:
 
 const SUMMARIZE_MERGE_PROMPT = `Gabungkan rangkuman berikut menjadi satu rangkuman koheren dalam Bahasa Indonesia.
 
+FORMAT WAJIB:
+- Output HANYA daftar bernomor ketat (1., 2., 3., ...) dari awal hingga akhir. Jangan gunakan heading "Bagian X" atau "Bagian 1:".
+- Sub-poin hanya jika perlu: gunakan 4 spasi sebelum "- " atau "a.", "b.", "c.".
+- Di AKHIR rangkuman, WAJIB tambahkan section **Kesimpulan:** (bold) diikuti 2–4 kalimat ringkasan singkat yang mensintesis poin utama. Jangan ulangi poin satu per satu.
+
 ATURAN PENTING:
-- DEDUPLIKASI: Poin yang sama atau mirip hanya perlu disebut SATU KALI. Gabungkan ide mirip menjadi satu paragraf; jangan ulangi di paragraf berbeda.
-- Format RAPAT/NOTULA hanya jika rangkuman per bagian JELAS berisi rapat/pertemuan (peserta, jalannya rapat, diskusi). Gabungkan ke format terstruktur dengan MARKDOWN: **bold** untuk heading dan istilah penting, daftar bernomor (1., 2.) dan sub-list huruf (a., b., c.). Pertahankan nama orang dan detail teknis. Untuk **Kesimpulan**: boleh tambahkan insight Anda sendiri (analisis, rekomendasi, observasi) yang relevan.
-- Jika rangkuman berisi buku/artikel/podcast (tidak ada peserta rapat, jalannya rapat): JANGAN gunakan format notula. Gunakan format **Rangkuman :** diikuti daftar bernomor (1., 2., 3.) dengan sub-poin (indent 2–4 spasi sebelum "- ") bila ada rincian. Pastikan poin berisi konten spesifik, bukan deskripsi umum. Tanpa duplikat. Boleh tambahkan insight Anda sendiri di poin terakhir.
-- Jika rangkuman berisi pedoman, panduan, peraturan: SELALU format **Rangkuman :** dengan daftar bernomor. Ekstrak aturan, prosedur, persyaratan konkret. JANGAN format notula. JANGAN struktur Latar Belakang/Tujuan/Kerangka Kerja yang hanya deskripsi. Pedoman bukan transkrip rapat.
-- Hindari kata "juga" di awal atau akhir kalimat. Variasikan kata penghubung dan frasa (selain itu, selanjutnya, menurut penulis, dll.) - jangan gunakan "penulis berpendapat" berulang kali.
+- DEDUPLIKASI: Poin yang sama atau mirip hanya perlu disebut SATU KALI. Gabungkan ide mirip menjadi satu poin. Jangan ulangi ide yang sama.
+- Gabungkan semua rangkuman menjadi satu daftar bernomor berurutan.
+- **bold** untuk nama orang, organisasi, istilah teknis.
+- Hindari kata "juga" di awal atau akhir kalimat. Variasikan struktur kalimat.
 - Perbaiki typo umum (mis. "menafigasi" → "menavigasi").
 - Pastikan rangkuman selesai LENGKAP; jangan potong di tengah kalimat atau paragraf.
-- Tanpa pembukaan lain, langsung rangkuman saja.
+- Tanpa pembukaan lain, langsung daftar bernomor saja.
+
+JANGAN SERTAKAN (konten tidak substantif):
+- Ucapan terima kasih, salam penutup, ajakan menonton/berlangganan.
+- Preferensi pribadi yang tidak terkait kebijakan atau keputusan.
+- Pengulangan poin yang sama tanpa informasi baru.
 
 Rangkuman per bagian:
 

@@ -138,6 +138,9 @@ const SEGMENTED_TIPS = [
   "Dokumen dengan struktur jelas lebih mudah dianalisis.",
 ];
 
+/** Set to true to show Hugging Face token, Analisis Rapat, and Segmented Summarize. */
+const SHOW_SEGMENTED_FEATURES = false;
+
 export default function Home() {
   const [groqApiKey, setGroqApiKey] = useState("");
   const [hfToken, setHfToken] = useState("");
@@ -623,32 +626,35 @@ export default function Home() {
           </p>
         </div>
 
-        <div className="w-full max-w-md mx-auto mb-6 text-left">
-          <label htmlFor="hf-token" className="block text-sm font-medium text-gray-700 mb-1">
-            Hugging Face Token <span className="text-gray-500">(opsional, disimpan 1 jam)</span>
-          </label>
-          <input
-            id="hf-token"
-            type="password"
-            value={hfToken}
-            onChange={(e) => setHfToken(e.target.value)}
-            placeholder="hf_..."
-            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-gray-900 placeholder-gray-400 focus:border-kemenkum-blue focus:outline-none focus:ring-1 focus:ring-kemenkum-blue"
-          />
-          <p className="mt-1 text-xs text-gray-500">
-            Untuk Segmented Summarize pada audio: klasifikasi pembicara via pyannote. Tanpa token: Groq Whisper (tanpa label pembicara).{" "}
-            <a
-              href="https://huggingface.co/pyannote/speaker-diarization-3.1"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-kemenkum-blue hover:underline"
-            >
-              Terima lisensi pyannote
-            </a>
-          </p>
-        </div>
+        {SHOW_SEGMENTED_FEATURES && (
+          <div className="w-full max-w-md mx-auto mb-6 text-left">
+            <label htmlFor="hf-token" className="block text-sm font-medium text-gray-700 mb-1">
+              Hugging Face Token <span className="text-gray-500">(opsional, disimpan 1 jam)</span>
+            </label>
+            <input
+              id="hf-token"
+              type="password"
+              value={hfToken}
+              onChange={(e) => setHfToken(e.target.value)}
+              placeholder="hf_..."
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-gray-900 placeholder-gray-400 focus:border-kemenkum-blue focus:outline-none focus:ring-1 focus:ring-kemenkum-blue"
+            />
+            <p className="mt-1 text-xs text-gray-500">
+              Untuk Segmented Summarize pada audio: klasifikasi pembicara via pyannote. Tanpa token: Groq Whisper (tanpa label pembicara).{" "}
+              <a
+                href="https://huggingface.co/pyannote/speaker-diarization-3.1"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-kemenkum-blue hover:underline"
+              >
+                Terima lisensi pyannote
+              </a>
+            </p>
+          </div>
+        )}
 
-        <div className="w-full max-w-md mx-auto mb-6 text-left">
+        {SHOW_SEGMENTED_FEATURES && (
+          <div className="w-full max-w-md mx-auto mb-6 text-left">
           <p className="block text-sm font-medium text-gray-700 mb-2">
             Analisis Rapat <span className="text-gray-500">(opsional, untuk Segmented Summarize)</span>
           </p>
@@ -680,6 +686,7 @@ export default function Home() {
             Jika diisi, Segmented Summarize akan menambahkan analisis stances (support/oppose/mixed), confidence score, dan bukti (evidence) per peserta.
           </p>
         </div>
+        )}
 
         <div
           onDragEnter={handleDrag}
@@ -824,7 +831,7 @@ export default function Home() {
                         )}
                     </div>
                   )}
-                  {segmentedLoading === item.id && segmentedProgress && (
+                  {SHOW_SEGMENTED_FEATURES && segmentedLoading === item.id && segmentedProgress && (
                     <div className="w-full min-w-0">
                       <div className="p-4 rounded-xl bg-gradient-to-br from-slate-50 to-blue-50 border border-slate-200">
                         <div className="flex items-center gap-3 mb-3">
@@ -904,22 +911,26 @@ export default function Home() {
                         Batalkan
                       </button>
                     )}
-                    <button
-                      type="button"
-                      onClick={() => handleSegmentedSummarize(item)}
-                      disabled={!!segmentedLoading}
-                      className="px-4 py-2 rounded-lg border border-kemenkum-blue text-kemenkum-blue bg-white text-sm font-medium hover:bg-kemenkum-blue/5 disabled:opacity-60 whitespace-nowrap"
-                    >
-                      {segmentedLoading === item.id ? "Processing…" : "Segmented Summarize"}
-                    </button>
-                    {segmentedLoading === item.id && (
-                      <button
-                        type="button"
-                        onClick={cancelSegmented}
-                        className="px-4 py-2 rounded-lg border border-rose-300 text-rose-700 text-sm font-medium hover:bg-rose-50 whitespace-nowrap"
-                      >
-                        Batalkan
-                      </button>
+                    {SHOW_SEGMENTED_FEATURES && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => handleSegmentedSummarize(item)}
+                          disabled={!!segmentedLoading}
+                          className="px-4 py-2 rounded-lg border border-kemenkum-blue text-kemenkum-blue bg-white text-sm font-medium hover:bg-kemenkum-blue/5 disabled:opacity-60 whitespace-nowrap"
+                        >
+                          {segmentedLoading === item.id ? "Processing…" : "Segmented Summarize"}
+                        </button>
+                        {segmentedLoading === item.id && (
+                          <button
+                            type="button"
+                            onClick={cancelSegmented}
+                            className="px-4 py-2 rounded-lg border border-rose-300 text-rose-700 text-sm font-medium hover:bg-rose-50 whitespace-nowrap"
+                          >
+                            Batalkan
+                          </button>
+                        )}
+                      </>
                     )}
                     <button
                       type="button"

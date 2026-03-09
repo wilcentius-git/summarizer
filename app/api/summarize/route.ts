@@ -9,10 +9,13 @@ import {
 import {
   createOcrFallback,
   deduplicateParagraphs,
+  deduplicateSummaryPoints,
   MAX_FILE_SIZE_BYTES,
   sleep,
   SUMMARIZE_CHUNK_DELAY_MS,
   SUMMARIZE_CHUNK_SIZE,
+  SUMMARIZE_MERGE_PRE_DELAY_MS,
+  SUMMARIZE_MERGE_THRESHOLD,
   splitIntoChunks,
   summarizeWithGroq,
 } from "@/lib/groq";
@@ -24,23 +27,27 @@ import {
   transcribeWithGroq,
 } from "@/lib/transcribe-audio";
 
+type MergeProgress = (current: number, total: number) => void;
+
 async function mergeSummaries(
   summaries: string[],
-  apiKey: string
+  apiKey: string,
+  onProgress?: MergeProgress
 ): Promise<string> {
   const combined = summaries.join("\n\n");
-  if (combined.length <= SUMMARIZE_CHUNK_SIZE) {
+  if (combined.length <= SUMMARIZE_MERGE_THRESHOLD) {
     return summarizeWithGroq(combined, apiKey, { isMerge: true });
   }
   const chunks = splitIntoChunks(combined, SUMMARIZE_CHUNK_SIZE);
   const merged: string[] = [];
   for (let i = 0; i < chunks.length; i++) {
     merged.push(await summarizeWithGroq(chunks[i], apiKey, { isMerge: true }));
+    onProgress?.(i + 1, chunks.length);
     if (i < chunks.length - 1) {
       await sleep(SUMMARIZE_CHUNK_DELAY_MS);
     }
   }
-  return mergeSummaries(merged, apiKey);
+  return mergeSummaries(merged, apiKey, onProgress);
 }
 
 function sendStreamLine(controller: ReadableStreamDefaultController<Uint8Array>, obj: object) {
@@ -222,14 +229,26 @@ export async function POST(request: NextRequest) {
             phase: "merge",
             current: 0,
             total: 1,
-            message: "Menggabungkan rangkuman…",
+            message: "Mempersiapkan penggabungan…",
             step: isAudio ? 2 : 1,
             stepLabel: "Gabung",
           });
-          summary = await mergeSummaries(chunkSummaries, apiKey);
+          await sleep(SUMMARIZE_MERGE_PRE_DELAY_MS);
+          summary = await mergeSummaries(chunkSummaries, apiKey, (cur, tot) => {
+            send({
+              type: "progress",
+              phase: "merge",
+              current: cur,
+              total: tot,
+              message: tot > 1 ? `Menggabungkan bagian ${cur} dari ${tot}…` : "Menggabungkan rangkuman…",
+              step: isAudio ? 2 : 1,
+              stepLabel: "Gabung",
+            });
+          });
         }
 
         if (!summary) summary = "Rangkuman tidak dapat dibuat.";
+        summary = deduplicateSummaryPoints(summary);
         send({ type: "summary", text: summary });
       } catch (err) {
         console.error("Summarize error:", err);

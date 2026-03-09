@@ -14,6 +14,7 @@ import {
 import {
   createOcrFallback,
   deduplicateParagraphs,
+  deduplicateSummaryPoints,
   fixCommonTypos,
   GROQ_API_URL,
   GROQ_MODEL,
@@ -68,20 +69,29 @@ Teks:
 const SEGMENTED_SUMMARIZE_PROMPT = `Teks berikut memiliki format label dan opini (transkrip percakapan dengan pembicara). Tugas Anda: rangkum dalam format daftar bernomor kronologis, singkat dan padat.
 
 Format output (WAJIB ikuti):
+**Ringkasan Eksekutif:**
+[2–3 kalimat yang merangkum inti percakapan: topik utama, aktor utama, kesimpulan utama]
+
 **Rangkuman :**
 1. [Poin pertama sesuai urutan kronologis]
 2. [Poin kedua]
 3. [Poin ketiga]
 ... (lanjutkan dengan nomor berurutan)
 
+**Kesimpulan:**
+**Ringkasan:** 2–3 kalimat sintesis poin utama.
+**Insight tambahan:** 2–3 insight yang actionable.
+Gunakan tata bahasa formal Indonesia ("Dengan demikian", "Oleh karena itu", "Dapat disimpulkan bahwa", "Perlu dilakukan", "Disarankan agar"). Daftar bernomor BERAKHIR sebelum Kesimpulan—jangan lanjutkan penomoran (11., 12., dst.) di dalam Kesimpulan. Format Ringkasan dan Insight tambahan TANPA nomor.
+
 Aturan:
 - Gunakan sudut pandang orang ketiga (mis. "Pembicara menjelaskan...", "Peserta menyatakan..."). Jangan gunakan "saya", "kita", atau "anda".
 - Urutkan poin sesuai kronologi kejadian (dari awal hingga akhir percakapan).
-- FOKUS PADA INTI: Rangkum hanya poin penting dan esensial. Maksimal 8–10 poin utama. Setiap poin 1 kalimat singkat.
+- FOKUS PADA INTI: Rangkum hanya poin penting dan esensial. Maksimal 5–6 poin utama per bagian. Setiap poin 1 kalimat singkat.
+- PRIORITAS: Hanya sertakan poin yang benar-benar penting dan substantif. Prioritaskan: keputusan, kebijakan, angka, nama, dan rekomendasi konkret.
 - Hindari pengulangan. Gabungkan poin serupa. DEDUPLIKASI: Poin yang sama hanya disebut SATU KALI.
 - Gunakan **bold** untuk nama orang, organisasi, istilah teknis.
 - Sub-poin: hanya jika benar-benar penting, gunakan 4 spasi sebelum "- ". Maksimal 1 sub-poin per poin utama.
-- Tanpa pembukaan lain, langsung **Rangkuman :** diikuti daftar bernomor.
+- Tanpa pembukaan lain, langsung **Ringkasan Eksekutif:** diikuti **Rangkuman :** diikuti daftar bernomor, diakhiri **Kesimpulan:**.
 
 Teks:
 
@@ -255,6 +265,7 @@ async function checkFormatAndSummarize(text: string, apiKey: string, send?: (obj
   }
 
   let summary = fixCommonTypos(summaries.join("\n\n") || "Rangkuman tidak dapat dibuat.");
+  summary = deduplicateSummaryPoints(summary);
   summary = ensureSubBulletIndentation(summary);
   return { summary };
 }

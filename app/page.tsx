@@ -62,7 +62,26 @@ type FileItem = {
   file: File;
   name: string;
   size: number;
+  /** Audio duration in seconds (loaded when file is added). */
+  durationSeconds?: number;
 };
+
+/** Get audio duration in seconds using the browser's Audio API. */
+function getAudioDurationInBrowser(file: File): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const audio = new Audio();
+    audio.onloadedmetadata = () => {
+      URL.revokeObjectURL(url);
+      resolve(audio.duration);
+    };
+    audio.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("Failed to load audio"));
+    };
+    audio.src = url;
+  });
+}
 
 function loadCachedGroqApiKey(): string {
   if (typeof window === "undefined") return "";
@@ -109,10 +128,39 @@ function estimateSummarizeSeconds(fileSizeBytes: number): number {
   return Math.max(30, Math.ceil(fileSizeBytes / 50000) * 45);
 }
 
-/** Rough estimate for Groq Whisper + summarization: ~30–60s for 8 min audio (~8MB). ~7s per MB. */
-function estimateAudioTranscribeSeconds(fileSizeBytes: number): number {
-  const mb = fileSizeBytes / (1024 * 1024);
-  return Math.max(30, Math.ceil(mb) * 7);
+/**
+ * Estimate time for Groq Whisper transcription + summarization (no diarization).
+ * Models: chunked transcription (~4 min/chunk, ~55s per chunk) + chunked summarization
+ * (~900 chars/min transcript, 4500 chars/chunk, ~42s per chunk + merge).
+ */
+function estimateAudioTranscribeSeconds(durationSeconds: number | undefined, fileSizeBytes: number): number {
+  const TRANSCRIBE_CHUNK_STEP_SEC = 238; // 4 min - 2 sec overlap
+  const TRANSCRIBE_SEC_PER_CHUNK = 55; // ~45s API + 3s delay + buffer for rate limits
+  const CHARS_PER_MIN_AUDIO = 900; // ~150 wpm * 6 chars/word
+  const SUMMARIZE_CHUNK_SIZE = 4500;
+  const SUMMARIZE_SEC_PER_CHUNK = 42; // ~30s API + 6s delay + buffer
+  const MERGE_OVERHEAD_SEC = 60; // pre-delay + merge API
+
+  let durationMin: number;
+  if (durationSeconds != null && durationSeconds > 0) {
+    durationMin = durationSeconds / 60;
+  } else {
+    // Fallback: ~1 MB ≈ 1 min for typical mp3
+    const mb = fileSizeBytes / (1024 * 1024);
+    durationMin = Math.max(1, mb);
+  }
+
+  const durationSec = durationMin * 60;
+  const transChunks =
+    durationSec <= 300 && fileSizeBytes <= 8 * 1024 * 1024
+      ? 1
+      : Math.ceil(durationSec / TRANSCRIBE_CHUNK_STEP_SEC);
+  const transcriptChars = durationMin * CHARS_PER_MIN_AUDIO;
+  const sumChunks = Math.max(1, Math.ceil(transcriptChars / SUMMARIZE_CHUNK_SIZE));
+
+  const transTime = transChunks * TRANSCRIBE_SEC_PER_CHUNK;
+  const sumTime = sumChunks * SUMMARIZE_SEC_PER_CHUNK + MERGE_OVERHEAD_SEC;
+  return Math.max(60, Math.ceil(transTime + sumTime));
 }
 
 /** Normalize text to prevent overlapping: \r causes overwrite; remove control chars. */
@@ -125,10 +173,27 @@ function sanitizeSummaryText(s: string): string {
     .replace(/\n{3,}/g, "\n\n");
 }
 
+/** Map Groq 412/413/429 errors to user-friendly messages. */
+function toUserFriendlyError(msg: string): string {
+  if (/41[23]/.test(msg)) return "You used up a per-minute quota.";
+  if (/429/.test(msg)) return "Wait for the rate limit window to reset (usually 1 hour).";
+  return msg;
+}
+
 function formatProcessTime(seconds: number): string {
   if (seconds < 60) return `${seconds} seconds`;
   if (seconds < 3600) return `${(seconds / 60).toFixed(1)} minutes`;
   return `${(seconds / 3600).toFixed(1)} hours`;
+}
+
+/** Format elapsed seconds as mm:ss (< 1h) or hh:mm:ss (≥ 1h). */
+function formatElapsedTime(seconds: number): string {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.floor(seconds % 60);
+  const pad = (n: number) => n.toString().padStart(2, "0");
+  if (h >= 1) return `${pad(h)}:${pad(m)}:${pad(s)}`;
+  return `${pad(m)}:${pad(s)}`;
 }
 
 const SEGMENTED_TIPS = [
@@ -255,12 +320,22 @@ export default function Home() {
         setError(`File ${file.name} exceeds ${maxSizeMB} MB${isAudioFile(file) ? " (audio limit)" : ""}.`);
         continue;
       }
+      const id = `${file.name}-${file.size}-${Date.now()}-${i}`;
       added.push({
-        id: `${file.name}-${file.size}-${Date.now()}-${i}`,
+        id,
         file,
         name: file.name,
         size: file.size,
       });
+      if (isAudioFile(file)) {
+        getAudioDurationInBrowser(file)
+          .then((duration) => {
+            setFiles((prev) =>
+              prev.map((f) => (f.id === id ? { ...f, durationSeconds: duration } : f))
+            );
+          })
+          .catch(() => {});
+      }
     }
     setFiles((prev) => [...prev, ...added]);
   }, []);
@@ -303,7 +378,7 @@ export default function Home() {
       setSummarizeProgress({ phase: "extracting", current: 0, total: 1 });
       setEstimatedSeconds(
         isAudioFile(item.file)
-          ? estimateAudioTranscribeSeconds(item.size)
+          ? estimateAudioTranscribeSeconds(item.durationSeconds, item.size)
           : estimateSummarizeSeconds(item.size)
       );
 
@@ -380,7 +455,7 @@ export default function Home() {
         if (err instanceof Error && err.name === "AbortError") {
           setError("Dibatalkan.");
         } else {
-          setError(err instanceof Error ? err.message : "Summarize failed.");
+          setError(toUserFriendlyError(err instanceof Error ? err.message : "Summarize failed."));
         }
       } finally {
         setSummarizeLoading(null);
@@ -573,7 +648,7 @@ export default function Home() {
         } else if (err instanceof Error && /fetch|network|connection|timeout/i.test(err.message)) {
           setError("Koneksi terputus atau waktu habis. Coba lagi atau gunakan file audio yang lebih pendek.");
         } else {
-          setError(err instanceof Error ? err.message : "Segmented summarization failed.");
+          setError(toUserFriendlyError(err instanceof Error ? err.message : "Segmented summarization failed."));
         }
       } finally {
         setSegmentedLoading(null);
@@ -748,7 +823,7 @@ export default function Home() {
                                   {summarizeProgress.message ?? "Memproses audio…"}
                                 </p>
                                 <p className="text-xs text-slate-500">
-                                  Langkah {summarizeProgress.step ?? 1}/2 • {elapsedSeconds}s
+                                  Langkah {summarizeProgress.step ?? 1}/2 • {formatElapsedTime(elapsedSeconds)}
                                 </p>
                               </div>
                             </div>
@@ -843,7 +918,7 @@ export default function Home() {
                               {segmentedProgress.message ?? "Memproses segmented…"}
                             </p>
                             <p className="text-xs text-slate-500">
-                              Langkah {segmentedProgress.step}/{leaderName.trim() ? 4 : 3} • {segmentedElapsedSeconds}s
+                              Langkah {segmentedProgress.step}/{leaderName.trim() ? 4 : 3} • {formatElapsedTime(segmentedElapsedSeconds)}
                             </p>
                           </div>
                         </div>
@@ -984,7 +1059,7 @@ export default function Home() {
             </div>
             {summary.elapsedSeconds != null && (
               <p className="text-sm text-gray-500 mb-2 text-left">
-                Proses selesai dalam {formatProcessTime(summary.elapsedSeconds)}.
+                Proses selesai dalam {formatElapsedTime(summary.elapsedSeconds ?? 0)}.
               </p>
             )}
             {summary.diarized !== undefined && (

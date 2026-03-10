@@ -7,12 +7,12 @@ import type { PdfPageImage } from "@/lib/pdf-to-images";
 
 export const MAX_FILE_SIZE_BYTES = 500 * 1024 * 1024; // 500 MB
 export const MAX_TEXT_LENGTH = 30000;
-/** Chunk size for summarization (~2000 tokens). Keeps requests under Groq TPM limit. */
-export const SUMMARIZE_CHUNK_SIZE = 8000;
+/** Chunk size for summarization (~1500 tokens). Keeps requests under Groq free tier 6K TPM. */
+export const SUMMARIZE_CHUNK_SIZE = 4500;
 /** Delay between chunk requests to avoid Groq TPM rate limit (429). */
 export const SUMMARIZE_CHUNK_DELAY_MS = 6000;
-/** Single merge when combined summaries fit. Avoids recursive chunked merge for typical 1h audio. */
-export const SUMMARIZE_MERGE_THRESHOLD = 25000;
+/** Single merge when combined summaries fit. Stays under Groq free tier 6K TPM per request. */
+export const SUMMARIZE_MERGE_THRESHOLD = 12000;
 /** Pause before merge to let rate limits recover after summarization phase. */
 export const SUMMARIZE_MERGE_PRE_DELAY_MS = 8000;
 export const GROQ_IMAGES_PER_REQUEST = 1;
@@ -39,42 +39,27 @@ export function deduplicateParagraphs(text: string): string {
 }
 
 /**
- * Removes duplicate numbered points from a summary.
- * Keeps first occurrence of each unique point; renumbers and preserves Kesimpulan.
+ * Removes duplicate or near-duplicate summary points from LLM output.
+ * Keeps first occurrence of each unique point (by normalized content).
  */
 export function deduplicateSummaryPoints(text: string): string {
-  if (!text?.trim()) return text;
-  const kesimpulanMatch = text.match(/(\n\*\*Kesimpulan\*\*:?\s*\n[\s\S]*)$/i);
-  const conclusion = kesimpulanMatch ? kesimpulanMatch[1] : "";
-  const body = kesimpulanMatch ? text.slice(0, kesimpulanMatch.index) : text;
-
-  const parts = body.split(/(?=^\d+\.\s+)/m).filter(Boolean);
-  const points: string[] = [];
-  for (const part of parts) {
-    const m = part.match(/^\d+\.\s+([\s\S]*)/);
-    if (m) points.push(m[1].trim());
-  }
-
+  if (!text.trim()) return text;
+  const paragraphs = text.split(/\n\n+/).map((p) => p.trim()).filter(Boolean);
   const seen = new Set<string>();
-  const unique: string[] = [];
-  for (const p of points) {
-    const key = p.toLowerCase().replace(/\s+/g, " ").trim().slice(0, 250);
+  const result: string[] = [];
+  for (const p of paragraphs) {
+    const key = p.toLowerCase().replace(/\s+/g, " ").slice(0, 200);
     if (seen.has(key)) continue;
     seen.add(key);
-    unique.push(p);
+    result.push(p);
   }
-
-  const renumbered = unique.map((c, i) => `${i + 1}. ${c}`).join("\n\n");
-  return (renumbered + (conclusion ? "\n\n" + conclusion : "")).trim();
+  return result.join("\n\n");
 }
 
 /** Fixes common typos in Indonesian text (e.g. from LLM output). */
 export function fixCommonTypos(text: string): string {
   if (!text) return text;
-  return text
-    .replace(/\bmenafigasi\b/gi, "menavigasi")
-    .replace(/\btompet\b/gi, "dompet")
-    .replace(/\bdengerin\b/gi, "mendengarkan");
+  return text.replace(/\bmenafigasi\b/gi, "menavigasi");
 }
 
 export function splitIntoChunks(text: string, maxSize: number): string[] {
@@ -178,7 +163,6 @@ const SUMMARIZE_PROMPT = `Anda adalah asisten yang merangkum dokumen. Aturan:
 PENTING - TENTUKAN JENIS DOKUMEN DULU:
 - Format RAPAT/NOTULA untuk: (a) dokumen rapat resmi dengan peserta, jalannya rapat, diskusi; atau (b) transkrip pertemuan/paparan (mis. pertemuan dengan pejabat, diskusi, paparan hasil).
 - Jangan gunakan format rapat untuk: buku, artikel, transkrip podcast/video umum yang bukan pertemuan, pedoman. Gunakan format "Dokumen Bukan Rapat".
-- PEDOMAN/PANDUAN/PERATURAN: Selalu format Dokumen Bukan Rapat. Pedoman adalah dokumen panduan/prosedur, BUKAN transkrip rapat. Meskipun dokumen menyebut "rapat" atau "pertemuan", tetap gunakan format **Rangkuman :** dengan daftar bernomor. JANGAN format Metadata, Peserta Rapat, Acara, Jalannya Rapat.
 
 UNTUK DOKUMEN RAPAT/NOTULA/PERTEMUAN:
 Gunakan format terstruktur dengan MARKDOWN:
@@ -211,38 +195,36 @@ Judul rapat (satu kalimat).
 Koordinasi, dokumen yang diserahkan, deadline, PIC.
 
 **Kesimpulan**
-Ringkasan poin penutup. Tambahkan insight tambahan (analisis, rekomendasi, observasi) yang relevan. Gunakan bahasa formal ("Dengan demikian", "Oleh karena itu", "Dapat disimpulkan bahwa").
+Ringkasan poin penutup. Boleh tambahkan insight Anda sendiri: analisis, rekomendasi, atau observasi yang relevan dengan dokumen. Insight boleh berupa sintesis, implikasi, atau saran yang tidak eksplisit di dokumen, selama tetap kontekstual.
 
 **Penandatangan** (jika ada)
 Notulis, Ketua Tim.
 
 UNTUK DOKUMEN BUKAN RAPAT (buku, artikel, pedoman, transkrip podcast/video):
-- RINGKASAN EKSEKUTIF (WAJIB): Awali WAJIB dengan **Ringkasan Eksekutif:** diikuti 2–3 kalimat yang merangkum inti dokumen (apa topik utama, siapa aktor utama, apa kesimpulan utama). Jangan lewatkan bagian ini. Baru setelah itu **Rangkuman :** dengan daftar bernomor.
-- EKSTRAK isi konkret dari dokumen. Jangan hanya mendeskripsikan dokumen. Hindari kalimat meta seperti "Dokumen ini merupakan...", "Tujuan dari dokumen ini adalah...". Fokus pada aturan, prosedur, persyaratan, dan poin spesifik yang tertulis.
-- Setiap poin harus berisi informasi spesifik dari dokumen, bukan ringkasan umum tentang jenis dokumen.
-- Untuk pedoman: ekstrak prosedur, aturan, langkah-langkah, persyaratan yang tertulis. Jangan gunakan struktur Latar Belakang/Tujuan/Kerangka Kerja jika itu hanya deskripsi umum.
-- Gunakan format daftar bernomor (1., 2., 3.) untuk poin utama. MAKSIMAL 15–20 poin.
-- Gunakan sub-poin dengan indentasi (2–4 spasi sebelum "- ") untuk rincian.
-- PRIORITAS: Hanya sertakan poin yang benar-benar penting dan substantif. Abaikan poin yang hanya mengulang ide yang sama atau kurang berdampak. Prioritaskan: keputusan, kebijakan, angka, nama, dan rekomendasi konkret.
-- Berikan contoh konkret dari dokumen. Jangan hanya kesimpulan abstrak.
+Gunakan format terstruktur dengan MARKDOWN (mirip format rapat):
+
+**Ringkasan Eksekutif:**
+[2–3 kalimat yang merangkum inti dokumen: topik utama, poin kunci, kesimpulan utama.]
+
+**Rangkuman:**
+1. [Poin penting pertama]
+2. [Poin penting kedua]
+3. [Poin penting ketiga]
+... (lanjutkan dengan nomor berurutan, maksimal 5–6 poin utama. Sub-poin: gunakan a., b., c. jika perlu)
+
+**Kesimpulan:**
+**Ringkasan:** 2–3 kalimat sintesis poin utama.
+**Insight tambahan:** 2–3 insight yang actionable (analisis, rekomendasi, observasi yang relevan).
+
 - JANGAN gunakan format notula (Metadata, Peserta Rapat, Acara, dll.) untuk dokumen ini.
 - Variasikan frasa: jangan ulangi "penulis berpendapat" berkali-kali; gunakan "menurut penulis", "penulis menyatakan", "penulis mengemukakan", dll.
-- Paragraf kesimpulan tidak boleh mengulang pembukaan; fokus pada ringkasan atau poin penutup yang baru.
-- KONSOLIDASI: Gabungkan poin yang mirip menjadi satu poin. Jangan ulangi ide yang sama.
-- KELENGKAPAN DAFTAR: Jika dokumen menyebut "X langkah", "Y sumber", "Z jenis" (misalnya "9 pintu rezeki", "6 langkah"), WAJIB uraikan SEMUA item. Jangan biarkan daftar tidak lengkap.
-- ALUR LOGIS: Urutkan poin agar alur jelas—konsep → penjelasan → contoh → langkah praktis. Jika satu konsep terkait dengan konsep lain, gabungkan atau susun berurutan dengan penjelasan hubungannya.
+- KONSOLIDASI: Gabungkan poin yang mirip menjadi satu. Jangan ulangi ide yang sama.
+- Gunakan **bold** untuk istilah penting, nama, organisasi.
 
 ATURAN UMUM:
-- FORMAT WAJIB: daftar bernomor ketat (1., 2., 3., ...). Sub-poin hanya jika perlu (4 spasi sebelum "- " atau "a.", "b.").
-- Di AKHIR rangkuman, WAJIB tambahkan **Kesimpulan:** sebagai section terpisah. Daftar bernomor BERAKHIR sebelum Kesimpulan—jangan lanjutkan penomoran (11., 12., dst.) di dalam Kesimpulan. Format Kesimpulan TANPA nomor:
-  **Ringkasan:** 2–3 kalimat yang mensintesis poin utama.
-  **Insight tambahan:** 2–3 insight yang actionable (rekomendasi konkret, langkah lanjut, hal yang perlu ditindaklanjuti).
-  Gunakan tata bahasa formal Indonesia: kalimat lengkap, subjek–predikat jelas, frasa seperti "Dengan demikian", "Oleh karena itu", "Dapat disimpulkan bahwa", "Perlu dilakukan", "Disarankan agar". Hindari bahasa kasual dan singkatan informal.
-- RANGKUMAN vs DESKRIPSI: Rangkum ISI dokumen (aturan, prosedur, poin penting). Jangan hanya mendeskripsikan jenis dokumen atau tujuannya.
-- DEDUPLIKASI KETAT: Poin yang mengungkapkan ide yang sama HANYA muncul SATU KALI. Gabungkan ke satu poin dengan sub-bullet jika perlu. Contoh: tiga kalimat tentang "kebutuhan baru diciptakan perusahaan" → satu poin saja.
-- JANGAN SERTAKAN (konten tidak substantif): ucapan terima kasih, salam penutup, ajakan menonton/berlangganan; preferensi pribadi yang tidak terkait kebijakan; pengulangan poin yang sama tanpa informasi baru.
+- DEDUPLIKASI: Poin yang sama atau mirip hanya perlu disebut SATU KALI. Hindari pengulangan ide.
 - Hindari kata "juga" di awal atau akhir kalimat. Variasikan struktur kalimat.
-- Perbaiki typo umum (tompet→dompet, dengerin→mendengarkan, menafigasi→menavigasi).
+- Perbaiki typo umum (mis. "menafigasi" → "menavigasi").
 - Gunakan konten dari SEMUA halaman dokumen. Jangan hanya merangkum halaman terakhir.
 - Tanpa pembukaan lain, langsung rangkuman saja.
 - Pastikan rangkuman selesai lengkap; jangan potong di tengah kalimat.
@@ -252,27 +234,12 @@ Dokumen:
 `;
 
 const SUMMARIZE_CHUNK_PROMPT = `Rangkum bagian berikut secara ringkas dalam Bahasa Indonesia.
-
-FORMAT WAJIB:
-- Output HANYA daftar bernomor ketat (1., 2., 3., ...). Jangan gunakan heading "Bagian X" atau "Bagian 1:".
-- MAKSIMAL 5–7 poin per bagian. Jika lebih dari 7 poin, gabungkan atau hapus poin yang paling tidak penting.
-- Sub-poin hanya jika perlu: gunakan 4 spasi sebelum "- " atau "a.", "b.", "c.".
-- Bold (**) untuk nama orang, organisasi, istilah teknis.
-
-- PRIORITAS: Hanya sertakan poin yang benar-benar penting dan substantif. Prioritaskan: keputusan, kebijakan, angka, nama, dan rekomendasi konkret.
-- DEDUPLIKASI KETAT: Poin yang mengungkapkan ide yang sama HANYA muncul SATU KALI. Gabungkan ide mirip menjadi satu poin dengan sub-bullet jika perlu.
-- KELENGKAPAN DAFTAR: Jika dokumen menyebut "X langkah", "Y sumber", "Z jenis", WAJIB uraikan SEMUA item.
-- ALUR LOGIS: Urutkan poin: konsep → penjelasan → contoh → langkah praktis. Konsep terkait disusun berurutan.
-- Jika notula/pertemuan: PERTAHANKAN nama orang, organisasi/unit, detail teknis.
-- Jika buku/artikel/podcast: ekstrak poin spesifik. Variasikan frasa (jangan ulangi "penulis berpendapat" berkali-kali).
-- Jika pedoman/peraturan: ekstrak aturan, prosedur, persyaratan. Hindari "Dokumen ini merupakan...".
-- Hindari kata "juga" di awal atau akhir kalimat. Perbaiki typo umum (tompet→dompet, dengerin→mendengarkan, menafigasi→menavigasi).
-- Tanpa pembukaan, langsung daftar bernomor saja. Pastikan kalimat terakhir selesai lengkap.
-
-JANGAN SERTAKAN (konten tidak substantif):
-- Ucapan terima kasih, salam penutup, ajakan menonton/berlangganan.
-- Preferensi pribadi yang tidak terkait kebijakan atau keputusan.
-- Pengulangan poin yang sama tanpa informasi baru.
+- Fokus pada poin-poin penting dan UNIK. Poin yang sama hanya disebut SATU KALI. Gabungkan ide mirip; jangan ulangi di paragraf berbeda.
+- Jika bagian ini dari notula/pertemuan (ada peserta, jalannya rapat, diskusi): PERTAHANKAN nama orang, organisasi/unit, detail teknis. Gunakan format: daftar bernomor (1., 2.) dan sub-list huruf (a., b., c.). Bold (**) untuk nama orang, organisasi, istilah teknis.
+- Jika bagian ini dari buku/artikel/podcast: gunakan format **Ringkasan Eksekutif** (2–3 kalimat), **Rangkuman** (daftar bernomor 1., 2., 3.), dan **Kesimpulan** dengan **Insight tambahan**. Variasikan frasa (jangan ulangi "penulis berpendapat" berkali-kali).
+- Hindari kata "juga" di awal atau akhir kalimat. Variasikan struktur kalimat.
+- Perbaiki typo umum (mis. "menafigasi" → "menavigasi").
+- Tanpa pembukaan, langsung rangkuman saja. Pastikan kalimat terakhir selesai lengkap.
 
 Bagian:
 
@@ -280,32 +247,14 @@ Bagian:
 
 const SUMMARIZE_MERGE_PROMPT = `Gabungkan rangkuman berikut menjadi satu rangkuman koheren dalam Bahasa Indonesia.
 
-PENTING: JANGAN PERNAH mengulang poin yang sama. MAKSIMAL 15–20 poin. Jika poin yang sama muncul di beberapa bagian, tulis HANYA SATU KALI. Jika total poin melebihi 20, gabungkan atau hapus poin yang paling tidak penting hingga tersisa maksimal 20 poin.
-
-FORMAT WAJIB:
-- Awali WAJIB dengan **Ringkasan Eksekutif:** 2–3 kalimat yang merangkum inti seluruh rangkuman (topik utama, aktor utama, kesimpulan utama). Jangan lewatkan bagian ini. Baru setelah itu daftar bernomor.
-- Output HANYA Ringkasan Eksekutif + daftar bernomor ketat (1., 2., 3., ...) dari awal hingga akhir. Jangan gunakan heading "Bagian X" atau "Bagian 1:".
-- Sub-poin hanya jika perlu: gunakan 4 spasi sebelum "- " atau "a.", "b.", "c.".
-- Di AKHIR rangkuman, WAJIB tambahkan **Kesimpulan:** sebagai section terpisah. Daftar bernomor BERAKHIR sebelum Kesimpulan—jangan lanjutkan penomoran (11., 12., dst.) di dalam Kesimpulan. Format Kesimpulan TANPA nomor:
-  **Ringkasan:** 2–3 kalimat sintesis poin utama.
-  **Insight tambahan:** 2–3 insight yang actionable (rekomendasi konkret, langkah lanjut, hal yang perlu ditindaklanjuti).
-  Gunakan tata bahasa formal Indonesia: kalimat lengkap, subjek–predikat jelas, frasa seperti "Dengan demikian", "Oleh karena itu", "Dapat disimpulkan bahwa", "Perlu dilakukan", "Disarankan agar". Hindari bahasa kasual dan singkatan informal.
-
 ATURAN PENTING:
-- PRIORITAS: Hanya sertakan poin yang benar-benar penting dan substantif. Prioritaskan: keputusan, kebijakan, angka, nama, dan rekomendasi konkret.
-- DEDUPLIKASI KETAT: Poin yang sama atau mirip HANYA muncul SATU KALI. Gabungkan ide mirip menjadi satu poin dengan sub-bullet jika perlu.
-- KELENGKAPAN DAFTAR: Jika ada "X langkah", "Y sumber", "Z jenis", pastikan SEMUA item teruraikan.
-- Gabungkan semua rangkuman menjadi satu daftar bernomor berurutan.
-- **bold** untuk nama orang, organisasi, istilah teknis.
-- Hindari kata "juga" di awal atau akhir kalimat. Variasikan struktur kalimat.
-- Perbaiki typo umum (tompet→dompet, dengerin→mendengarkan, menafigasi→menavigasi).
+- DEDUPLIKASI: Poin yang sama atau mirip hanya perlu disebut SATU KALI. Gabungkan ide mirip menjadi satu paragraf; jangan ulangi di paragraf berbeda.
+- Format RAPAT/NOTULA hanya jika rangkuman per bagian JELAS berisi rapat/pertemuan (peserta, jalannya rapat, diskusi). Gabungkan ke format terstruktur dengan MARKDOWN: **bold** untuk heading dan istilah penting, daftar bernomor (1., 2.) dan sub-list huruf (a., b., c.). Pertahankan nama orang dan detail teknis. Untuk **Kesimpulan**: boleh tambahkan insight Anda sendiri (analisis, rekomendasi, observasi) yang relevan.
+- Jika rangkuman berisi buku/artikel/podcast (tidak ada peserta rapat, jalannya rapat): Gabungkan ke format terstruktur: **Ringkasan Eksekutif** (2–3 kalimat), **Rangkuman** (daftar bernomor 1., 2., 3., sub-poin a., b., c. jika perlu), **Kesimpulan** dengan **Ringkasan** (2–3 kalimat sintesis) dan **Insight tambahan** (2–3 insight actionable). JANGAN gunakan format notula (Metadata, Peserta Rapat, Acara, dll.).
+- Hindari kata "juga" di awal atau akhir kalimat. Variasikan kata penghubung dan frasa (selain itu, selanjutnya, menurut penulis, dll.) - jangan gunakan "penulis berpendapat" berulang kali.
+- Perbaiki typo umum (mis. "menafigasi" → "menavigasi").
 - Pastikan rangkuman selesai LENGKAP; jangan potong di tengah kalimat atau paragraf.
-- Tanpa pembukaan lain, langsung daftar bernomor saja.
-
-JANGAN SERTAKAN (konten tidak substantif):
-- Ucapan terima kasih, salam penutup, ajakan menonton/berlangganan.
-- Preferensi pribadi yang tidak terkait kebijakan atau keputusan.
-- Pengulangan poin yang sama tanpa informasi baru.
+- Tanpa pembukaan lain, langsung rangkuman saja.
 
 Rangkuman per bagian:
 
@@ -313,6 +262,17 @@ Rangkuman per bagian:
 
 export function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+/** User-friendly message for Groq 412/413 (quota) and 429 (rate limit). */
+export function getGroqUserFriendlyError(status: number): string | null {
+  if (status === 412 || status === 413) {
+    return "You used up a per-minute quota.";
+  }
+  if (status === 429) {
+    return "Wait for the rate limit window to reset (usually 1 hour).";
+  }
+  return null;
 }
 
 /** Parse "try again in X.XXs" from Groq 429 error. Returns ms to wait, or default. */
@@ -359,8 +319,7 @@ export async function summarizeWithGroq(
         choices?: Array<{ message?: { content?: string } }>;
       };
       const raw = json.choices?.[0]?.message?.content?.trim() ?? "";
-      const fixed = fixCommonTypos(raw);
-      return options?.isMerge ? deduplicateSummaryPoints(fixed) : fixed;
+      return fixCommonTypos(raw);
     }
 
     const errBody = await res.text();

@@ -16,6 +16,7 @@ import {
   deduplicateParagraphs,
   deduplicateSummaryPoints,
   fixCommonTypos,
+  getGroqUserFriendlyError,
   GROQ_API_URL,
   GROQ_MODEL,
   MAX_FILE_SIZE_BYTES,
@@ -47,8 +48,8 @@ import {
 export const maxDuration = 7200;
 
 const NO_SEGMENTED_FORMAT = "no segmented opinion format";
-/** Max chars per chunk to stay under Groq TPM (~6000 tokens). ~4 chars/token ≈ 18000 chars. */
-const SEGMENTED_CHUNK_SIZE = 18000;
+/** Max chars per chunk to stay under Groq TPM (~6000 tokens). ~2–3 chars/token for Indonesian. */
+const SEGMENTED_CHUNK_SIZE = 8000;
 
 const FORMAT_CHECK_PROMPT = `Anda memeriksa apakah teks berikut memiliki format "label dan opini" yang jelas.
 
@@ -203,7 +204,8 @@ async function checkFormatAndSummarize(text: string, apiKey: string, send?: (obj
       await sleep(parseRetryAfterMs(errBody, 35000));
       continue;
     }
-    return { error: `Format check failed: ${r.status}. ${errBody}` };
+    const friendly = getGroqUserFriendlyError(r.status);
+    return { error: friendly ?? `Format check failed: ${r.status}. ${errBody}` };
   }
 
   const json = (await formatRes!.json()) as { choices?: Array<{ message?: { content?: string } }> };
@@ -239,7 +241,7 @@ async function checkFormatAndSummarize(text: string, apiKey: string, send?: (obj
         body: JSON.stringify({
           model: GROQ_MODEL,
           messages: [{ role: "user", content: SEGMENTED_SUMMARIZE_PROMPT + chunks[i] }],
-          max_tokens: 4096,
+          max_tokens: 2048,
           temperature: 0.3,
         }),
       });
@@ -252,7 +254,8 @@ async function checkFormatAndSummarize(text: string, apiKey: string, send?: (obj
         await sleep(parseRetryAfterMs(errBody, 35000));
         continue;
       }
-      return { error: `Summarization failed: ${r.status}. ${errBody}` };
+      const friendly = getGroqUserFriendlyError(r.status);
+      return { error: friendly ?? `Summarization failed: ${r.status}. ${errBody}` };
     }
 
     const sumJson = (await sumRes!.json()) as { choices?: Array<{ message?: { content?: string } }> };
@@ -312,7 +315,8 @@ async function runMeetingAnalysis(
 
   if (!r.ok) {
     const errBody = await r.text();
-    return { error: `Meeting analysis failed: ${r.status}. ${errBody}` };
+    const friendly = getGroqUserFriendlyError(r.status);
+    return { error: friendly ?? `Meeting analysis failed: ${r.status}. ${errBody}` };
   }
 
   const json = (await r.json()) as { choices?: Array<{ message?: { content?: string } }> };

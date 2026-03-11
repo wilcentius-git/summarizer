@@ -1,13 +1,13 @@
 {
   "name": "summarizer",
-  "version": "0.19.0",
+  "version": "0.20.0",
   "private": true,
   "scripts": {
     "dev": "concurrently \"next dev\" \"npx tsx scripts/rate-limit-worker.ts\"",
     "build": "next build",
     "start": "next start",
     "start:all": "concurrently \"next start\" \"npx tsx scripts/rate-limit-worker.ts\"",
-    "lint": "next lint",
+    "lint": "eslint .",
     "worker": "npx tsx scripts/rate-limit-worker.ts",
     "install:gpu": "node scripts/install-gpu.js",
     "postinstall": "prisma generate",

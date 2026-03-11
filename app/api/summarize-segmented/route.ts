@@ -4,7 +4,10 @@ import { tmpdir } from "os";
 import { join } from "path";
 import { existsSync } from "fs";
 import { writeFile, unlink } from "fs/promises";
+import { cookies } from "next/headers";
 
+import { prisma } from "@/lib/prisma";
+import { verifyToken } from "@/lib/auth";
 import {
   extractText,
   isSupportedFileName,
@@ -14,18 +17,15 @@ import {
 import {
   createOcrFallback,
   deduplicateParagraphs,
-  deduplicateSummaryPoints,
-  fixCommonTypos,
   getGroqUserFriendlyError,
   GROQ_API_URL,
   GROQ_MODEL,
   MAX_FILE_SIZE_BYTES,
   MAX_TEXT_LENGTH,
-  parseRetryAfterMs,
-  splitIntoChunks,
   sleep,
   SUMMARIZE_CHUNK_DELAY_MS,
 } from "@/lib/groq";
+import { checkFormatAndSummarize } from "@/lib/segmented-summarize";
 import {
   buildMeetingUserPrompt,
   fixSpeakerAttribution,
@@ -46,63 +46,6 @@ import {
 
 /** Allow long-running diarization (40 min audio can take 1–2 hours on CPU). 2 hours max. Vercel caps by plan. */
 export const maxDuration = 7200;
-
-const NO_SEGMENTED_FORMAT = "no segmented opinion format";
-/** Max chars per chunk to stay under Groq TPM (~6000 tokens). ~2–3 chars/token for Indonesian. */
-const SEGMENTED_CHUNK_SIZE = 8000;
-
-const FORMAT_CHECK_PROMPT = `Anda memeriksa apakah teks berikut memiliki format "label dan opini" yang jelas.
-
-Format yang valid: teks memiliki segmen dengan label (nama pembicara, topik, atau judul bagian) diikuti oleh opini atau pendapat. Contoh:
-- "Budi: Saya setuju dengan proposal ini karena..."
-- "Topik A: Menurut saya opsi pertama lebih baik..."
-- "[Pembicara 1]: Pendapat saya adalah..."
-
-Jika teks TIDAK memiliki format label+opini yang jelas (misalnya: teks naratif biasa, dokumen tanpa pembagian per pembicara/topik, atau teks yang tidak terstruktur), jawab dengan TEPAT:
-${NO_SEGMENTED_FORMAT}
-
-Jika teks MEMILIKI format label+opini yang jelas, jawab dengan satu kata: VALID
-
-Teks:
-
-`;
-
-const SEGMENTED_SUMMARIZE_PROMPT = `Teks berikut memiliki format label dan opini (transkrip percakapan dengan pembicara). Tugas Anda: rangkum dalam format daftar bernomor kronologis, singkat dan padat.
-
-Format output (WAJIB ikuti):
-**Ringkasan Eksekutif:**
-[2–3 kalimat yang merangkum inti percakapan: topik utama, aktor utama, kesimpulan utama]
-
-**Rangkuman :**
-1. [Poin pertama sesuai urutan kronologis]
-2. [Poin kedua]
-3. [Poin ketiga]
-... (lanjutkan dengan nomor berurutan)
-
-**Kesimpulan:**
-**Ringkasan:** 2–3 kalimat sintesis poin utama.
-**Insight tambahan:** 2–3 insight yang actionable.
-Gunakan tata bahasa formal Indonesia ("Dengan demikian", "Oleh karena itu", "Dapat disimpulkan bahwa", "Perlu dilakukan", "Disarankan agar"). Daftar bernomor BERAKHIR sebelum Kesimpulan—jangan lanjutkan penomoran (11., 12., dst.) di dalam Kesimpulan. Format Ringkasan dan Insight tambahan TANPA nomor.
-
-Aturan:
-- Gunakan sudut pandang orang ketiga (mis. "Pembicara menjelaskan...", "Peserta menyatakan..."). Jangan gunakan "saya", "kita", atau "anda".
-- Urutkan poin sesuai kronologi kejadian (dari awal hingga akhir percakapan).
-- FOKUS PADA INTI: Rangkum hanya poin penting dan esensial. Maksimal 5–6 poin utama per bagian. Setiap poin 1 kalimat singkat.
-- PRIORITAS: Hanya sertakan poin yang benar-benar penting dan substantif. Prioritaskan: keputusan, kebijakan, angka, nama, dan rekomendasi konkret.
-- Hindari pengulangan. Gabungkan poin serupa. DEDUPLIKASI: Poin yang sama hanya disebut SATU KALI.
-- Gunakan **bold** untuk nama orang, organisasi, istilah teknis.
-- Sub-poin: hanya jika benar-benar penting, gunakan 4 spasi sebelum "- ". Maksimal 1 sub-poin per poin utama.
-- Tanpa pembukaan lain, langsung **Ringkasan Eksekutif:** diikuti **Rangkuman :** diikuti daftar bernomor, diakhiri **Kesimpulan:**.
-
-Teks:
-
-`;
-
-/** Ensures sub-bullets (• or -) have 4 spaces before them for PDF indentation. */
-function ensureSubBulletIndentation(text: string): string {
-  if (!text) return text;
-  return text.replace(/^(\s{0,3})([-•]\s+)/gm, "    $2");
-}
 
 function runDiarizeScript(
   audioPath: string,
@@ -171,106 +114,11 @@ function sendStreamLine(controller: ReadableStreamDefaultController<Uint8Array>,
   controller.enqueue(encoder.encode(JSON.stringify(obj) + "\n"));
 }
 
-async function checkFormatAndSummarize(text: string, apiKey: string, send?: (obj: object) => void): Promise<{ summary: string } | { error: string }> {
-  const trimmed = text.trim().slice(0, MAX_TEXT_LENGTH);
-  if (!trimmed) {
-    return { error: "No text to process." };
-  }
-
-  const chunks = splitIntoChunks(trimmed, SEGMENTED_CHUNK_SIZE);
-  const formatCheckChunk = chunks[0];
-
-  let formatRes: Response | null = null;
-  for (let attempt = 0; attempt <= 3; attempt++) {
-    const r = await fetch(GROQ_API_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: GROQ_MODEL,
-        messages: [{ role: "user", content: FORMAT_CHECK_PROMPT + formatCheckChunk }],
-        max_tokens: 64,
-        temperature: 0,
-      }),
-    });
-    if (r.ok) {
-      formatRes = r;
-      break;
-    }
-    const errBody = await r.text();
-    if (r.status === 429 && attempt < 3) {
-      await sleep(parseRetryAfterMs(errBody, 35000));
-      continue;
-    }
-    const friendly = getGroqUserFriendlyError(r.status);
-    return { error: friendly ?? `Format check failed: ${r.status}. ${errBody}` };
-  }
-
-  const json = (await formatRes!.json()) as { choices?: Array<{ message?: { content?: string } }> };
-  const reply = (json.choices?.[0]?.message?.content ?? "").trim();
-
-  if (reply.toLowerCase().includes(NO_SEGMENTED_FORMAT) || reply.toLowerCase().includes("no segmented")) {
-    return { error: NO_SEGMENTED_FORMAT };
-  }
-
-  if (!reply.toUpperCase().includes("VALID")) {
-    return { error: NO_SEGMENTED_FORMAT };
-  }
-
-  const summaries: string[] = [];
-  for (let i = 0; i < chunks.length; i++) {
-    if (chunks.length > 1) {
-      send?.({
-        type: "progress",
-        step: 3,
-        stepLabel: "Rangkuman",
-        message: `Merangkum bagian ${i + 1} dari ${chunks.length}…`,
-      });
-    }
-
-    let sumRes: Response | null = null;
-    for (let attempt = 0; attempt <= 3; attempt++) {
-      const r = await fetch(GROQ_API_URL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-          model: GROQ_MODEL,
-          messages: [{ role: "user", content: SEGMENTED_SUMMARIZE_PROMPT + chunks[i] }],
-          max_tokens: 2048,
-          temperature: 0.3,
-        }),
-      });
-      if (r.ok) {
-        sumRes = r;
-        break;
-      }
-      const errBody = await r.text();
-      if (r.status === 429 && attempt < 3) {
-        await sleep(parseRetryAfterMs(errBody, 35000));
-        continue;
-      }
-      const friendly = getGroqUserFriendlyError(r.status);
-      return { error: friendly ?? `Summarization failed: ${r.status}. ${errBody}` };
-    }
-
-    const sumJson = (await sumRes!.json()) as { choices?: Array<{ message?: { content?: string } }> };
-    const part = sumJson.choices?.[0]?.message?.content?.trim() ?? "";
-    if (part) summaries.push(part);
-
-    if (i < chunks.length - 1) {
-      await sleep(SUMMARIZE_CHUNK_DELAY_MS);
-    }
-  }
-
-  let summary = fixCommonTypos(summaries.join("\n\n") || "Rangkuman tidak dapat dibuat.");
-  summary = deduplicateSummaryPoints(summary);
-  summary = ensureSubBulletIndentation(summary);
-  return { summary };
+function toFileType(fileName: string, isAudio: boolean): "mp3" | "pdf" | "docx" {
+  const ext = fileName.toLowerCase().slice(fileName.lastIndexOf("."));
+  if (isAudio || [".mp3", ".wav", ".m4a", ".webm", ".flac", ".ogg"].includes(ext)) return "mp3";
+  if (ext === ".pdf") return "pdf";
+  return "docx";
 }
 
 async function runMeetingAnalysis(
@@ -349,6 +197,13 @@ async function runMeetingAnalysis(
 
 export async function POST(request: NextRequest) {
   try {
+    const cookieStore = await cookies();
+    const token = cookieStore.get("auth-token")?.value;
+    const payload = token ? await verifyToken(token) : null;
+    if (!payload) {
+      return NextResponse.json({ error: "Unauthorized. Please log in." }, { status: 401 });
+    }
+
     const formData = await request.formData();
     const apiKey = (formData.get("groqApiKey") as string)?.trim();
     const hfToken = (formData.get("hfToken") as string)?.trim();
@@ -397,6 +252,17 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const job = await prisma.summaryJob.create({
+      data: {
+        userId: payload.userId,
+        filename: fileName,
+        fileType: toFileType(fileName, isAudio),
+        status: "pending",
+        progressPercentage: 0,
+        groqAttempts: 0,
+      },
+    });
+
     const stream = new ReadableStream({
     async start(controller) {
       const send = (obj: object) => {
@@ -407,7 +273,36 @@ export async function POST(request: NextRequest) {
         }
       };
 
+      const RETRY_AFTER_HOURS = 1;
+
+      const updateJob = async (updates: {
+        status?: string;
+        progressPercentage?: number;
+        summaryText?: string;
+        errorMessage?: string;
+        retryAfter?: Date;
+        extractedTextForRetry?: string;
+        jobRetryContext?: string;
+        totalChunks?: number;
+        processedChunks?: number;
+        partialSummary?: string;
+      }) => {
+        try {
+          await prisma.summaryJob.update({
+            where: { id: job.id },
+            data: updates,
+          });
+        } catch (e) {
+          console.error("SummaryJob update failed:", e);
+        }
+      };
+
       try {
+        await updateJob({ status: "processing", progressPercentage: 5 });
+        send({
+          type: "job",
+          jobId: job.id,
+        });
         send({
           type: "progress",
           step: 1,
@@ -483,6 +378,7 @@ export async function POST(request: NextRequest) {
             });
             text = deduplicateParagraphs(text);
             if (!text.trim()) {
+              await updateJob({ status: "failed", errorMessage: "No speech could be transcribed from the audio. Try a different file." });
               send({ type: "error", message: "No speech could be transcribed from the audio. Try a different file." });
               controller.close();
               return;
@@ -504,6 +400,12 @@ export async function POST(request: NextRequest) {
         }
 
         if (!text.trim()) {
+          await updateJob({
+            status: "failed",
+            errorMessage: isAudio
+              ? "No speech could be transcribed from the audio."
+              : "No text could be extracted from the document.",
+          });
           send({
             type: "error",
             message: isAudio
@@ -514,6 +416,15 @@ export async function POST(request: NextRequest) {
           return;
         }
 
+        await updateJob({
+          progressPercentage: 40,
+          extractedTextForRetry: text,
+          jobRetryContext: JSON.stringify({
+            flow: "segmented",
+            leaderName,
+            leaderPosition,
+          }),
+        });
         send({
           type: "progress",
           step: 2,
@@ -521,14 +432,48 @@ export async function POST(request: NextRequest) {
           message: "Memeriksa format label dan opini…",
         });
 
-        const result = await checkFormatAndSummarize(text, apiKey, send);
+        const accumulatedSummaries: string[] = [];
+        const result = await checkFormatAndSummarize(text, apiKey, send, {
+          startFromChunk: 0,
+          initialSummaries: [],
+          onChunkComplete: async (chunkIndex, part, totalChunks) => {
+            accumulatedSummaries.push(part);
+            await updateJob({
+              processedChunks: chunkIndex + 1,
+              totalChunks,
+              partialSummary: JSON.stringify(accumulatedSummaries),
+            });
+          },
+        });
 
         if ("error" in result) {
+          if (result.isRateLimit) {
+            const retryAfter = new Date(Date.now() + RETRY_AFTER_HOURS * 60 * 60 * 1000);
+            await updateJob({
+              status: "waiting_rate_limit",
+              retryAfter,
+              extractedTextForRetry: text,
+              jobRetryContext: JSON.stringify({
+                flow: "segmented",
+                leaderName,
+                leaderPosition,
+              }),
+            });
+            send({
+              type: "waiting_rate_limit",
+              message: "Groq rate limit reached. Job will retry automatically in about 1 hour.",
+              retryAfter: retryAfter.toISOString(),
+            });
+            controller.close();
+            return;
+          }
+          await updateJob({ status: "failed", errorMessage: result.error });
           send({ type: "error", message: result.error });
           controller.close();
           return;
         }
 
+        await updateJob({ progressPercentage: 90, summaryText: result.summary });
         send({
           type: "progress",
           step: 3,
@@ -536,6 +481,7 @@ export async function POST(request: NextRequest) {
           message: "Merangkum per segmen…",
         });
 
+        await updateJob({ status: "completed", progressPercentage: 100 });
         send({ type: "summary", text: result.summary, diarized, device: diarizeDevice });
 
         if (leaderName) {
@@ -554,6 +500,7 @@ export async function POST(request: NextRequest) {
       } catch (err) {
         console.error("Segmented summarize error:", err);
         const message = err instanceof Error ? err.message : "Segmented summarization failed.";
+        await updateJob({ status: "failed", errorMessage: message });
         send({ type: "error", message });
       } finally {
         controller.close();

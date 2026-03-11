@@ -1,6 +1,6 @@
 /**
  * Shared Groq API utilities for OCR and document processing.
- * Used by both /api/summarize and /api/summarize-meeting.
+ * Used by /api/summarize and /api/summarize-segmented.
  */
 
 import type { PdfPageImage } from "@/lib/pdf-to-images";
@@ -212,10 +212,9 @@ Gunakan format terstruktur dengan MARKDOWN (mirip format rapat):
 3. [Poin penting ketiga]
 ... (lanjutkan dengan nomor berurutan, maksimal 5–6 poin utama. Sub-poin: gunakan a., b., c. jika perlu)
 
-**Kesimpulan:**
-**Ringkasan:** 2–3 kalimat sintesis poin utama.
 **Insight tambahan:** 2–3 insight yang actionable (analisis, rekomendasi, observasi yang relevan).
 
+- Output HANYA 3 bagian: (1) Ringkasan Eksekutif, (2) Rangkuman (satu daftar bernomor saja), (3) Insight tambahan. JANGAN tambahkan Kesimpulan, Ringkasan, atau sub-bagian "Rangkasan [topik]".
 - JANGAN gunakan format notula (Metadata, Peserta Rapat, Acara, dll.) untuk dokumen ini.
 - Variasikan frasa: jangan ulangi "penulis berpendapat" berkali-kali; gunakan "menurut penulis", "penulis menyatakan", "penulis mengemukakan", dll.
 - KONSOLIDASI: Gabungkan poin yang mirip menjadi satu. Jangan ulangi ide yang sama.
@@ -236,7 +235,7 @@ Dokumen:
 const SUMMARIZE_CHUNK_PROMPT = `Rangkum bagian berikut secara ringkas dalam Bahasa Indonesia.
 - Fokus pada poin-poin penting dan UNIK. Poin yang sama hanya disebut SATU KALI. Gabungkan ide mirip; jangan ulangi di paragraf berbeda.
 - Jika bagian ini dari notula/pertemuan (ada peserta, jalannya rapat, diskusi): PERTAHANKAN nama orang, organisasi/unit, detail teknis. Gunakan format: daftar bernomor (1., 2.) dan sub-list huruf (a., b., c.). Bold (**) untuk nama orang, organisasi, istilah teknis.
-- Jika bagian ini dari buku/artikel/podcast: gunakan format **Ringkasan Eksekutif** (2–3 kalimat), **Rangkuman** (daftar bernomor 1., 2., 3.), dan **Kesimpulan** dengan **Insight tambahan**. Variasikan frasa (jangan ulangi "penulis berpendapat" berkali-kali).
+- Jika bagian ini dari buku/artikel/podcast: gunakan format HANYA 3 bagian: **Ringkasan Eksekutif** (2–3 kalimat), **Rangkuman** (daftar bernomor 1., 2., 3.), **Insight tambahan**. JANGAN tambahkan Kesimpulan atau Rangkasan per topik. Variasikan frasa (jangan ulangi "penulis berpendapat" berkali-kali).
 - Hindari kata "juga" di awal atau akhir kalimat. Variasikan struktur kalimat.
 - Perbaiki typo umum (mis. "menafigasi" → "menavigasi").
 - Tanpa pembukaan, langsung rangkuman saja. Pastikan kalimat terakhir selesai lengkap.
@@ -245,16 +244,23 @@ Bagian:
 
 `;
 
-const SUMMARIZE_MERGE_PROMPT = `Gabungkan rangkuman berikut menjadi satu rangkuman koheren dalam Bahasa Indonesia.
+const SUMMARIZE_MERGE_PROMPT = `Input di bawah terdiri dari BEBERAPA rangkuman per bagian (setiap bagian punya Ringkasan Eksekutif, Rangkuman, Insight tambahan). Ini dari dokumen yang sama yang dipotong menjadi beberapa chunk.
+
+Tugas Anda: GABUNGKAN semuanya menjadi SATU rangkuman final. Output HANYA:
+- SATU **Ringkasan Eksekutif** (sintesis semua bagian menjadi 2–3 kalimat)
+- SATU **Rangkuman** (satu daftar bernomor 1., 2., 3., ... gabungkan semua poin)
+- SATU **Insight tambahan** (gabungkan insight terbaik dari semua bagian)
+
+JANGAN output ulang setiap blok. JANGAN ada lebih dari satu Ringkasan Eksekutif, satu Rangkuman, atau satu Insight tambahan.
 
 ATURAN PENTING:
-- DEDUPLIKASI: Poin yang sama atau mirip hanya perlu disebut SATU KALI. Gabungkan ide mirip menjadi satu paragraf; jangan ulangi di paragraf berbeda.
+- DEDUPLIKASI: Poin yang sama atau mirip hanya perlu disebut SATU KALI. Gabungkan ide mirip menjadi satu; jangan ulangi di paragraf berbeda.
 - Format RAPAT/NOTULA hanya jika rangkuman per bagian JELAS berisi rapat/pertemuan (peserta, jalannya rapat, diskusi). Gabungkan ke format terstruktur dengan MARKDOWN: **bold** untuk heading dan istilah penting, daftar bernomor (1., 2.) dan sub-list huruf (a., b., c.). Pertahankan nama orang dan detail teknis. Untuk **Kesimpulan**: boleh tambahkan insight Anda sendiri (analisis, rekomendasi, observasi) yang relevan.
-- Jika rangkuman berisi buku/artikel/podcast (tidak ada peserta rapat, jalannya rapat): Gabungkan ke format terstruktur: **Ringkasan Eksekutif** (2–3 kalimat), **Rangkuman** (daftar bernomor 1., 2., 3., sub-poin a., b., c. jika perlu), **Kesimpulan** dengan **Ringkasan** (2–3 kalimat sintesis) dan **Insight tambahan** (2–3 insight actionable). JANGAN gunakan format notula (Metadata, Peserta Rapat, Acara, dll.).
+- Jika rangkuman berisi buku/artikel/podcast (tidak ada peserta rapat, jalannya rapat): Output WAJIB tepat 3 bagian—**Ringkasan Eksekutif**, **Rangkuman**, **Insight tambahan**. Gabungkan semua poin dari tiap bagian ke dalam SATU daftar bernomor. Sintesis semua Ringkasan Eksekutif menjadi satu paragraf. Gabungkan insight menjadi satu blok. JANGAN output blok Ringkasan Eksekutif/Rangkuman/Insight lebih dari sekali.
 - Hindari kata "juga" di awal atau akhir kalimat. Variasikan kata penghubung dan frasa (selain itu, selanjutnya, menurut penulis, dll.) - jangan gunakan "penulis berpendapat" berulang kali.
 - Perbaiki typo umum (mis. "menafigasi" → "menavigasi").
 - Pastikan rangkuman selesai LENGKAP; jangan potong di tengah kalimat atau paragraf.
-- Tanpa pembukaan lain, langsung rangkuman saja.
+- Tanpa pembukaan lain, langsung rangkuman saja. Output akhir: tepat satu blok **Ringkasan Eksekutif**, satu blok **Rangkuman**, satu blok **Insight tambahan**. Tidak boleh ada pengulangan struktur ini.
 
 Rangkuman per bagian:
 
@@ -262,6 +268,45 @@ Rangkuman per bagian:
 
 export function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+export type MergeProgress = (current: number, total: number) => void;
+
+export async function mergeSummaries(
+  summaries: string[],
+  apiKey: string,
+  onProgress?: MergeProgress
+): Promise<string> {
+  const combined = summaries.join("\n\n");
+  if (combined.length <= SUMMARIZE_MERGE_THRESHOLD) {
+    return summarizeWithGroq(combined, apiKey, { isMerge: true });
+  }
+  const chunks = splitIntoChunks(combined, SUMMARIZE_CHUNK_SIZE);
+  const merged: string[] = [];
+  for (let i = 0; i < chunks.length; i++) {
+    merged.push(await summarizeWithGroq(chunks[i], apiKey, { isMerge: true }));
+    onProgress?.(i + 1, chunks.length);
+    if (i < chunks.length - 1) {
+      await sleep(SUMMARIZE_CHUNK_DELAY_MS);
+    }
+  }
+  return mergeSummaries(merged, apiKey, onProgress);
+}
+
+/** Error thrown when Groq returns 429 after all retries. Job should be set to waiting_rate_limit. */
+export class GroqRateLimitError extends Error {
+  constructor(
+    message: string,
+    public readonly retryAfterMs: number
+  ) {
+    super(message);
+    this.name = "GroqRateLimitError";
+  }
+}
+
+/** Check if an error is a Groq rate limit error (429). */
+export function isGroqRateLimitError(err: unknown): err is GroqRateLimitError {
+  return err instanceof GroqRateLimitError;
 }
 
 /** User-friendly message for Groq 412/413 (quota) and 429 (rate limit). */
@@ -323,14 +368,18 @@ export async function summarizeWithGroq(
     }
 
     const errBody = await res.text();
-    lastError = new Error(`Groq API error: ${res.status}. ${errBody}`);
+    const waitMs = res.status === 429 ? parseRetryAfterMs(errBody, 60 * 60 * 1000) : 0;
 
     if (res.status === 429 && attempt < maxRetries - 1) {
-      const waitMs = parseRetryAfterMs(errBody, 20000);
       await sleep(waitMs);
       continue;
     }
 
+    if (res.status === 429) {
+      throw new GroqRateLimitError(`Groq API rate limit: ${res.status}. ${errBody}`, waitMs);
+    }
+
+    lastError = new Error(`Groq API error: ${res.status}. ${errBody}`);
     throw lastError;
   }
 

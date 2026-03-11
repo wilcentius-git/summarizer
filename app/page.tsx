@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 
 import kemenkumLogo from "@/assets/kemenkum_logo.png";
+import { useAuth } from "@/app/contexts/AuthContext";
 
 const GROQ_API_KEY_CACHE_DURATION_MS = 60 * 60 * 1000; // 1 hour
 const GROQ_API_KEY_CACHE_KEY = "groqApiKeyCache";
@@ -180,12 +181,6 @@ function toUserFriendlyError(msg: string): string {
   return msg;
 }
 
-function formatProcessTime(seconds: number): string {
-  if (seconds < 60) return `${seconds} seconds`;
-  if (seconds < 3600) return `${(seconds / 60).toFixed(1)} minutes`;
-  return `${(seconds / 3600).toFixed(1)} hours`;
-}
-
 /** Format elapsed seconds as mm:ss (< 1h) or hh:mm:ss (≥ 1h). */
 function formatElapsedTime(seconds: number): string {
   const h = Math.floor(seconds / 3600);
@@ -206,10 +201,30 @@ const SEGMENTED_TIPS = [
 /** Set to true to show Hugging Face token, Analisis Rapat, and Segmented Summarize. */
 const SHOW_SEGMENTED_FEATURES = false;
 
+type SummaryJobItem = {
+  id: string;
+  filename: string;
+  fileType: string;
+  uploadTime: string;
+  status: string;
+  summaryText: string | null;
+  progressPercentage: number;
+  groqAttempts: number;
+  errorMessage: string | null;
+  retryAfter?: string | null;
+  isResumable?: boolean;
+  totalChunks?: number | null;
+  processedChunks?: number;
+};
+
 export default function Home() {
+  const { user, loading: authLoading, logout } = useAuth();
   const [groqApiKey, setGroqApiKey] = useState("");
   const [hfToken, setHfToken] = useState("");
   const [files, setFiles] = useState<FileItem[]>([]);
+  const [historyJobs, setHistoryJobs] = useState<SummaryJobItem[]>([]);
+  const [historyExpanded, setHistoryExpanded] = useState(false);
+  const [viewingJobId, setViewingJobId] = useState<string | null>(null);
   const [dragActive, setDragActive] = useState(false);
   const [summarizeLoading, setSummarizeLoading] = useState<string | null>(null);
   const [summarizeProgress, setSummarizeProgress] = useState<{
@@ -228,6 +243,23 @@ export default function Home() {
     setGroqApiKey(loadCachedGroqApiKey());
     setHfToken(loadCachedHfToken());
   }, []);
+
+  const fetchHistory = useCallback(async () => {
+    if (!user) return;
+    try {
+      const res = await fetch("/api/summary-jobs", { credentials: "include" });
+      if (res.ok) {
+        const data = await res.json();
+        setHistoryJobs(data.jobs ?? []);
+      }
+    } catch {
+      // Ignore fetch errors
+    }
+  }, [user]);
+
+  useEffect(() => {
+    fetchHistory();
+  }, [fetchHistory]);
 
   useEffect(() => {
     if (groqApiKey.trim()) saveGroqApiKeyToCache(groqApiKey);
@@ -266,7 +298,10 @@ export default function Home() {
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const [resumeLoading, setResumeLoading] = useState<string | null>(null);
   const [segmentedLoading, setSegmentedLoading] = useState<string | null>(null);
+  const [currentSegmentedJobId, setCurrentSegmentedJobId] = useState<string | null>(null);
+  const [currentSummarizeJobId, setCurrentSummarizeJobId] = useState<string | null>(null);
   const [segmentedProgress, setSegmentedProgress] = useState<{
     step: number;
     stepLabel: string;
@@ -298,9 +333,139 @@ export default function Home() {
     return () => clearInterval(interval);
   }, [segmentedLoading]);
 
-  const cancelSegmented = useCallback(() => {
+  const pauseSegmented = useCallback(() => {
     segmentedAbortRef.current?.abort();
   }, []);
+
+  const abortSegmented = useCallback(async () => {
+    segmentedAbortRef.current?.abort();
+    const jobId = currentSegmentedJobId ?? resumeLoading;
+    if (jobId) {
+      try {
+        await fetch(`/api/summary-jobs/${jobId}/cancel`, {
+          method: "POST",
+          credentials: "include",
+        });
+        fetchHistory();
+      } catch {
+        // Ignore
+      }
+    }
+    setCurrentSegmentedJobId(null);
+  }, [currentSegmentedJobId, resumeLoading, fetchHistory]);
+
+  const handleResumeJob = useCallback(
+    async (job: SummaryJobItem) => {
+      const key = groqApiKey.trim();
+      if (!key) {
+        setError("Masukkan Groq API key terlebih dahulu. Dapatkan di console.groq.com");
+        return;
+      }
+      if (!job.isResumable) return;
+      setError(null);
+      setResumeLoading(job.id);
+      setSegmentedProgress({ step: 3, stepLabel: "Rangkuman", message: "Melanjutkan…" });
+
+      const controller = new AbortController();
+      segmentedAbortRef.current = controller;
+      const startTime = Date.now();
+
+      try {
+        const res = await fetch(`/api/summary-jobs/${job.id}/resume`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ groqApiKey: key }),
+          signal: controller.signal,
+          credentials: "include",
+        });
+
+        if (!res.ok || !res.body) {
+          const text = await res.text();
+          let errMsg = `Resume failed: ${res.status}`;
+          try {
+            const data = JSON.parse(text);
+            if (data?.error) errMsg = data.error;
+          } catch {
+            if (text && text.length < 200) errMsg = text;
+          }
+          throw new Error(errMsg);
+        }
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() ?? "";
+
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            try {
+              const data = JSON.parse(line) as {
+                type?: string;
+                step?: number;
+                stepLabel?: string;
+                phase?: string;
+                current?: number;
+                total?: number;
+                message?: string;
+                text?: string;
+              };
+              if (data.type === "progress") {
+                const msg =
+                  data.message ??
+                  (data.phase === "chunks" && data.total != null
+                    ? `Bagian ${data.current ?? 0} dari ${data.total}`
+                    : data.phase === "merge"
+                      ? "Menggabungkan rangkuman…"
+                      : "Memproses…");
+                setSegmentedProgress({
+                  step: data.step ?? 3,
+                  stepLabel: data.stepLabel ?? "Rangkuman",
+                  message: msg,
+                });
+              } else if (data.type === "summary") {
+                const elapsed = Math.floor((Date.now() - startTime) / 1000);
+                setSummary({
+                  fileId: job.id,
+                  fileName: job.filename,
+                  text: sanitizeSummaryText(data.text ?? ""),
+                  elapsedSeconds: elapsed,
+                });
+                fetchHistory();
+              } else if (data.type === "waiting_rate_limit") {
+                fetchHistory();
+                setError(null);
+                setResumeLoading(null);
+                setSegmentedProgress(null);
+                return;
+              } else if (data.type === "error") {
+                throw new Error(data.message ?? "Resume failed.");
+              }
+            } catch (parseErr) {
+              if (parseErr instanceof SyntaxError) continue;
+              throw parseErr;
+            }
+          }
+        }
+      } catch (err) {
+        if (err instanceof Error && err.name === "AbortError") {
+          setError("Dibatalkan.");
+        } else {
+          setError(toUserFriendlyError(err instanceof Error ? err.message : "Resume failed."));
+        }
+      } finally {
+        setResumeLoading(null);
+        setSegmentedProgress(null);
+        segmentedAbortRef.current = null;
+      }
+    },
+    [groqApiKey, fetchHistory]
+  );
 
   const addFiles = useCallback((newFiles: FileList | null) => {
     if (!newFiles?.length) return;
@@ -362,9 +527,25 @@ export default function Home() {
     [addFiles]
   );
 
-  const cancelSummarize = useCallback(() => {
+  const pauseSummarize = useCallback(() => {
     summarizeAbortRef.current?.abort();
   }, []);
+
+  const abortSummarize = useCallback(async () => {
+    summarizeAbortRef.current?.abort();
+    if (currentSummarizeJobId) {
+      try {
+        await fetch(`/api/summary-jobs/${currentSummarizeJobId}/cancel`, {
+          method: "POST",
+          credentials: "include",
+        });
+        fetchHistory();
+      } catch {
+        // Ignore
+      }
+    }
+    setCurrentSummarizeJobId(null);
+  }, [currentSummarizeJobId, fetchHistory]);
 
   const handleSummarize = useCallback(
     async (item: FileItem) => {
@@ -374,6 +555,7 @@ export default function Home() {
         return;
       }
       setError(null);
+      setCurrentSummarizeJobId(null);
       setSummarizeLoading(item.id);
       setSummarizeProgress({ phase: "extracting", current: 0, total: 1 });
       setEstimatedSeconds(
@@ -417,6 +599,7 @@ export default function Home() {
             try {
               const data = JSON.parse(line) as {
                 type?: string;
+                jobId?: string;
                 phase?: string;
                 current?: number;
                 total?: number;
@@ -425,7 +608,9 @@ export default function Home() {
                 step?: number;
                 stepLabel?: string;
               };
-              if (data.type === "progress") {
+              if (data.type === "job" && data.jobId) {
+                setCurrentSummarizeJobId(data.jobId);
+              } else if (data.type === "progress") {
                 setSummarizeProgress({
                   phase: data.phase ?? "processing",
                   current: data.current ?? 0,
@@ -442,6 +627,13 @@ export default function Home() {
                   text: sanitizeSummaryText(data.text ?? ""),
                   elapsedSeconds: elapsed,
                 });
+                fetchHistory();
+              } else if (data.type === "waiting_rate_limit") {
+                fetchHistory();
+                setError(null);
+                setSummarizeLoading(null);
+                setSummarizeProgress(null);
+                return;
               } else if (data.type === "error") {
                 throw new Error(data.message ?? "Summarization failed.");
               }
@@ -461,10 +653,11 @@ export default function Home() {
         setSummarizeLoading(null);
         setSummarizeProgress(null);
         setEstimatedSeconds(null);
+        setCurrentSummarizeJobId(null);
         summarizeAbortRef.current = null;
       }
     },
-    [groqApiKey]
+    [groqApiKey, fetchHistory]
   );
 
   const copySummary = useCallback(() => {
@@ -545,6 +738,89 @@ export default function Home() {
     }
   }, [summary?.text, summary?.fileName]);
 
+  const copyHistoryJob = useCallback((text: string) => {
+    if (!text) return;
+    navigator.clipboard.writeText(text);
+  }, []);
+
+  const exportHistoryJobToPdf = useCallback(
+    async (text: string, filename: string) => {
+      if (!text) return;
+      const stripMarkdown = (s: string) =>
+        s
+          .replace(/\*\*(.+?)\*\*/g, "$1")
+          .replace(/\*(.+?)\*/g, "$1")
+          .replace(/^#+\s*/gm, "")
+          .replace(/^(\s*)[-*]\s+/gm, "$1• ");
+      const sanitizeForPdf = (s: string) =>
+        s
+          .replace(/\r\n/g, "\n")
+          .replace(/\r/g, "\n")
+          .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, "")
+          .replace(/\n{3,}/g, "\n\n");
+      const content = sanitizeForPdf(stripMarkdown(text));
+      const dateStr = new Date().toLocaleString("id-ID", {
+        day: "numeric",
+        month: "long",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+      const baseName = filename?.replace(/\.[^.]+$/, "") ?? "document";
+      const fileName = `${baseName}-summary.pdf`;
+      try {
+        const { jsPDF } = await import("jspdf");
+        const doc = new jsPDF({ unit: "mm", format: "a4" });
+        const margin = 20;
+        const maxWidth = 210 - margin * 2;
+        const lineHeight = 6;
+        const pageHeight = 297;
+        const maxY = pageHeight - margin;
+        let y = margin;
+        const addText = (t: string, fontSize = 11) => {
+          doc.setFontSize(fontSize);
+          const lines = doc.splitTextToSize(t, maxWidth);
+          for (const line of lines) {
+            if (y > maxY) {
+              doc.addPage();
+              y = margin;
+            }
+            doc.text(line, margin, y);
+            y += lineHeight;
+          }
+        };
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(10);
+        doc.setTextColor(100, 100, 100);
+        addText(`Dokumen: ${filename ?? "—"}`, 10);
+        addText(`Tanggal dibuat: ${dateStr}`, 10);
+        y += 4;
+        doc.setTextColor(0, 0, 0);
+        doc.setFontSize(11);
+        addText(content);
+        doc.save(fileName);
+      } catch (err) {
+        setError("Gagal mendownload PDF. Coba lagi.");
+        console.error(err);
+      }
+    },
+    []
+  );
+
+  const deleteHistoryJob = useCallback(async (jobId: string) => {
+    try {
+      const res = await fetch(`/api/summary-jobs/${jobId}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error("Failed to delete");
+      setHistoryJobs((prev) => prev.filter((j) => j.id !== jobId));
+      if (viewingJobId === jobId) setViewingJobId(null);
+    } catch {
+      setError("Gagal menghapus. Coba lagi.");
+    }
+  }, [viewingJobId]);
+
   const handleSegmentedSummarize = useCallback(
     async (item: FileItem) => {
       const key = groqApiKey.trim();
@@ -553,6 +829,7 @@ export default function Home() {
         return;
       }
       setError(null);
+      setCurrentSegmentedJobId(null);
       setSegmentedLoading(item.id);
       setSegmentedProgress({ step: 1, stepLabel: "Memulai…", message: "Mempersiapkan…" });
 
@@ -605,6 +882,7 @@ export default function Home() {
             try {
               const data = JSON.parse(line) as {
                 type?: string;
+                jobId?: string;
                 step?: number;
                 stepLabel?: string;
                 message?: string;
@@ -613,7 +891,9 @@ export default function Home() {
                 device?: string;
                 analysis?: { leader?: { name: string; position: string }; participants: MeetingParticipant[] };
               };
-              if (data.type === "progress") {
+              if (data.type === "job" && data.jobId) {
+                setCurrentSegmentedJobId(data.jobId);
+              } else if (data.type === "progress") {
                 setSegmentedProgress({
                   step: data.step ?? 1,
                   stepLabel: data.stepLabel ?? "",
@@ -629,6 +909,13 @@ export default function Home() {
                   device: data.device,
                   elapsedSeconds: elapsed,
                 });
+                fetchHistory();
+              } else if (data.type === "waiting_rate_limit") {
+                fetchHistory();
+                setError(null);
+                setSegmentedLoading(null);
+                setSegmentedProgress(null);
+                return;
               } else if (data.type === "analysis") {
                 setSummary((prev) =>
                   prev ? { ...prev, analysis: data.analysis } : prev
@@ -653,10 +940,11 @@ export default function Home() {
       } finally {
         setSegmentedLoading(null);
         setSegmentedProgress(null);
+        setCurrentSegmentedJobId(null);
         segmentedAbortRef.current = null;
       }
     },
-    [groqApiKey, hfToken, leaderName, leaderPosition]
+    [groqApiKey, hfToken, leaderName, leaderPosition, fetchHistory]
   );
 
   const formatSize = (bytes: number) => {
@@ -667,7 +955,34 @@ export default function Home() {
 
   return (
     <main className="min-h-screen bg-kemenkum-blue py-8 px-4 flex justify-center items-center overflow-y-auto">
-      <div className="w-full max-w-2xl bg-white rounded-lg shadow-lg px-4 sm:px-8 py-10 mx-auto overflow-x-hidden text-center">
+      <div className="w-full max-w-2xl bg-white rounded-lg shadow-lg px-4 sm:px-8 pt-4 pb-10 mx-auto overflow-x-hidden text-center">
+        {user && (
+          <div className="flex items-center justify-between gap-3 mb-6">
+            <span className="text-base text-kemenkum-blue font-medium truncate">{user.email}</span>
+            <button
+              type="button"
+              onClick={logout}
+              title="Logout"
+              className="p-2 rounded-lg text-kemenkum-blue hover:opacity-80 shrink-0"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="24"
+                height="24"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                <polyline points="16 17 21 12 16 7" />
+                <line x1="21" y1="12" x2="9" y2="12" />
+              </svg>
+            </button>
+          </div>
+        )}
         <div className="flex items-center justify-center gap-3 mb-2">
           <Image src={kemenkumLogo} alt="Kemenkum" width={48} height={48} />
           <h1 className="text-2xl font-bold text-kemenkum-blue">Kemenkum Summarizer</h1>
@@ -978,13 +1293,22 @@ export default function Home() {
                       {summarizeLoading === item.id ? "Summarizing…" : "Summarize"}
                     </button>
                     {summarizeLoading === item.id && (
-                      <button
-                        type="button"
-                        onClick={cancelSummarize}
-                        className="px-4 py-2 rounded-lg border border-rose-300 text-rose-700 text-sm font-medium hover:bg-rose-50 whitespace-nowrap"
-                      >
-                        Batalkan
-                      </button>
+                      <>
+                        <button
+                          type="button"
+                          onClick={pauseSummarize}
+                          className="px-4 py-2 rounded-lg border border-amber-300 text-amber-700 text-sm font-medium hover:bg-amber-50 whitespace-nowrap"
+                        >
+                          Jeda
+                        </button>
+                        <button
+                          type="button"
+                          onClick={abortSummarize}
+                          className="px-4 py-2 rounded-lg border border-rose-300 text-rose-700 text-sm font-medium hover:bg-rose-50 whitespace-nowrap"
+                        >
+                          Batalkan
+                        </button>
+                      </>
                     )}
                     {SHOW_SEGMENTED_FEATURES && (
                       <>
@@ -997,13 +1321,22 @@ export default function Home() {
                           {segmentedLoading === item.id ? "Processing…" : "Segmented Summarize"}
                         </button>
                         {segmentedLoading === item.id && (
-                          <button
-                            type="button"
-                            onClick={cancelSegmented}
-                            className="px-4 py-2 rounded-lg border border-rose-300 text-rose-700 text-sm font-medium hover:bg-rose-50 whitespace-nowrap"
-                          >
-                            Batalkan
-                          </button>
+                          <>
+                            <button
+                              type="button"
+                              onClick={pauseSegmented}
+                              className="px-4 py-2 rounded-lg border border-amber-300 text-amber-700 text-sm font-medium hover:bg-amber-50 whitespace-nowrap"
+                            >
+                              Jeda
+                            </button>
+                            <button
+                              type="button"
+                              onClick={abortSegmented}
+                              className="px-4 py-2 rounded-lg border border-rose-300 text-rose-700 text-sm font-medium hover:bg-rose-50 whitespace-nowrap"
+                            >
+                              Batalkan
+                            </button>
+                          </>
                         )}
                       </>
                     )}
@@ -1155,6 +1488,163 @@ export default function Home() {
             <div className="w-full p-4 rounded-lg border border-gray-200 bg-gray-50 text-gray-900 text-left min-h-[200px] max-h-[400px] overflow-y-auto [&_h1]:text-xl [&_h1]:font-bold [&_h1]:mt-2 [&_h1]:mb-1 [&_h2]:text-lg [&_h2]:font-semibold [&_h2]:mt-3 [&_h2]:mb-1 [&_h3]:text-base [&_h3]:font-medium [&_h3]:mt-2 [&_h3]:mb-1 [&_p]:mb-2 [&_ul]:list-disc [&_ul]:pl-6 [&_ul]:mb-2 [&_ol]:list-decimal [&_ol]:pl-6 [&_ol]:mb-2 [&_li]:mb-0.5 [&_strong]:font-semibold">
               <ReactMarkdown>{summary.text}</ReactMarkdown>
             </div>
+          </section>
+        )}
+
+        {user && (
+          <section className="mt-8 text-center">
+            <button
+              type="button"
+              onClick={() => setHistoryExpanded(!historyExpanded)}
+              className="flex items-center justify-start gap-2 w-full py-2 text-base font-semibold text-kemenkum-blue rounded-lg"
+            >
+              <span>{historyExpanded ? "▼" : "▶"}</span>
+              Riwayat Unggahan ({historyJobs.length})
+            </button>
+            {historyExpanded && (
+              <div className="mt-3 text-left">
+                {historyJobs.length === 0 ? (
+                  <p className="text-sm text-gray-500 py-4">Belum ada riwayat. Unggah dan rangkum file untuk melihat riwayat di sini.</p>
+                ) : (
+                  <ul className="space-y-2 max-h-[400px] overflow-y-auto">
+                    {historyJobs.map((job) => (
+                      <li
+                        key={job.id}
+                        className="p-3 rounded-lg border border-gray-200 bg-white shadow-sm"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="min-w-0 flex-1">
+                            <p className="font-medium text-gray-900 truncate">{job.filename}</p>
+                            <p className="text-xs text-gray-500">
+                              {new Date(job.uploadTime).toLocaleString("id-ID")} • {job.fileType.toUpperCase()}
+                            </p>
+                            <span
+                              className={`inline-block mt-1 px-2 py-0.5 rounded text-xs font-medium ${
+                                job.status === "completed"
+                                  ? "bg-emerald-100 text-emerald-800"
+                                  : job.status === "failed"
+                                    ? "bg-red-100 text-red-800"
+                                    : job.status === "cancelled"
+                                      ? "bg-gray-200 text-gray-600"
+                                      : job.status === "waiting_rate_limit"
+                                        ? "bg-amber-100 text-amber-800"
+                                        : job.status === "processing"
+                                          ? "bg-blue-100 text-blue-800"
+                                          : "bg-gray-100 text-gray-700"
+                              }`}
+                            >
+                              {job.status === "completed"
+                                ? "Selesai"
+                                : job.status === "failed"
+                                  ? "Gagal"
+                                  : job.status === "cancelled"
+                                    ? "Dibatalkan"
+                                    : job.status === "waiting_rate_limit"
+                                      ? "Menunggu batas API"
+                                      : job.status === "processing"
+                                        ? `${job.progressPercentage}%`
+                                        : job.status}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            {job.isResumable && (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => handleResumeJob(job)}
+                                  disabled={!!resumeLoading}
+                                  className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:opacity-90 disabled:opacity-50"
+                                >
+                                  {resumeLoading === job.id ? "Melanjutkan…" : "Lanjutkan"}
+                                </button>
+                                {resumeLoading === job.id && (
+                                  <>
+                                    <button
+                                      type="button"
+                                      onClick={pauseSegmented}
+                                      className="px-3 py-1.5 rounded-lg border border-amber-300 text-amber-700 text-sm font-medium hover:bg-amber-50"
+                                    >
+                                      Jeda
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={abortSegmented}
+                                      className="px-3 py-1.5 rounded-lg border border-rose-300 text-rose-700 text-sm font-medium hover:bg-rose-50"
+                                    >
+                                      Batalkan
+                                    </button>
+                                  </>
+                                )}
+                              </>
+                            )}
+                            {job.status === "completed" && job.summaryText && (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setViewingJobId(viewingJobId === job.id ? null : job.id)
+                                  }
+                                  className="px-3 py-1.5 rounded-lg bg-kemenkum-blue text-white text-sm font-medium hover:opacity-90"
+                                >
+                                  {viewingJobId === job.id ? "Tutup" : "Lihat"}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => copyHistoryJob(job.summaryText!)}
+                                  className="px-3 py-1.5 rounded-lg bg-kemenkum-yellow text-kemenkum-blue text-sm font-medium hover:opacity-90"
+                                >
+                                  Copy
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => exportHistoryJobToPdf(job.summaryText!, job.filename)}
+                                  className="px-3 py-1.5 rounded-lg bg-kemenkum-yellow text-kemenkum-blue text-sm font-medium hover:opacity-90"
+                                >
+                                  Export PDF
+                                </button>
+                              </>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => deleteHistoryJob(job.id)}
+                              className="px-3 py-1.5 rounded-lg border border-red-300 text-red-700 text-sm font-medium hover:bg-red-50"
+                            >
+                              Hapus
+                            </button>
+                          </div>
+                        </div>
+                        {viewingJobId === job.id && job.summaryText && (
+                          <div className="mt-3 p-3 rounded-lg bg-gray-50 border border-gray-100 text-sm text-gray-900 max-h-[300px] overflow-y-auto">
+                            <ReactMarkdown>{job.summaryText}</ReactMarkdown>
+                          </div>
+                        )}
+                        {job.status === "failed" && job.errorMessage && (
+                          <p className="mt-2 text-xs text-red-600">{job.errorMessage}</p>
+                        )}
+                        {job.status === "cancelled" && !job.isResumable && (
+                          <p className="mt-2 text-xs text-gray-600">
+                            Dibatalkan sebelum transkripsi selesai (~40%). Tombol Lanjutkan hanya tersedia jika dibatalkan setelah transkripsi selesai.
+                          </p>
+                        )}
+                        {job.status === "waiting_rate_limit" && (
+                          <p className="mt-2 text-xs text-amber-700">
+                            Batas Groq API tercapai. Job akan dicoba ulang otomatis dalam ~1 jam.
+                            {job.retryAfter && (
+                              <> Retry: {new Date(job.retryAfter).toLocaleString("id-ID")}</>
+                            )}
+                          </p>
+                        )}
+                        {resumeLoading === job.id && segmentedProgress && (
+                          <p className="mt-2 text-xs text-blue-600">
+                            {segmentedProgress.message ?? "Melanjutkan…"}
+                          </p>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
           </section>
         )}
 

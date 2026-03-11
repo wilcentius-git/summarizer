@@ -1,6 +1,6 @@
 /**
  * Shared meeting analysis logic.
- * Used by /api/summarize-meeting and /api/summarize-segmented (when leader context is provided).
+ * Used by /api/summarize-segmented (when leader context is provided).
  */
 
 export type TranscriptTurn = { speaker: string; text: string };

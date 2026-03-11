@@ -2,6 +2,7 @@
 const nextConfig = {
   output: "standalone",
   experimental: {
+    middlewareClientMaxBodySize: "25mb",
     serverComponentsExternalPackages: [
       "@napi-rs/canvas",
       "pdfjs-dist",

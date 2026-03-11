@@ -1,0 +1,40 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String       @id @default(cuid())
+  email        String       @unique
+  passwordHash String       @map("password_hash")
+  createdAt    DateTime     @default(now()) @map("created_at")
+  summaryJobs  SummaryJob[]
+}
+
+model SummaryJob {
+  id                    String    @id @default(cuid())
+  userId                String    @map("user_id")
+  filename              String
+  fileType              String    @map("file_type") // mp3 | pdf | docx
+  uploadTime            DateTime  @default(now()) @map("upload_time")
+  status                String    @default("pending") // pending | processing | waiting_rate_limit | completed | failed
+  summaryText           String?   @map("summary_text")
+  progressPercentage    Int       @default(0) @map("progress_percentage")
+  totalChunks           Int?      @map("total_chunks")
+  processedChunks       Int       @default(0) @map("processed_chunks")
+  partialSummary       String?   @map("partial_summary")
+  groqAttempts          Int       @default(0) @map("groq_attempts")
+  errorMessage          String?   @map("error_message")
+  retryAfter            DateTime? @map("retry_after")
+  extractedTextForRetry String?   @map("extracted_text_for_retry")
+  jobRetryContext       String?   @map("job_retry_context") // JSON: { flow, leaderName?, leaderPosition? }
+  resumeToken           String?   @unique @map("resume_token") // Secret token for resume without login
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("summary_jobs")
+}

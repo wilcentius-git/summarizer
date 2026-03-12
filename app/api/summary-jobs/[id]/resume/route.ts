@@ -8,14 +8,20 @@ import { prisma } from "@/lib/prisma";
 type ResumableJob = {
   id: string;
   status: string;
+  filename: string;
   extractedTextForRetry: string | null;
   jobRetryContext: string | null;
   partialSummary?: string | null;
+  partialTranscript?: string | null;
   processedChunks?: number;
+  processedTranscribeChunks?: number;
+  audioPath?: string | null;
 };
+import * as fs from "fs";
 import { verifyToken } from "@/lib/auth";
 import {
   deduplicateSummaryPoints,
+  isGroqRateLimitError,
   mergeSummaries,
   sleep,
   SUMMARIZE_CHUNK_DELAY_MS,
@@ -24,7 +30,14 @@ import {
   splitIntoChunks,
   summarizeWithGroq,
 } from "@/lib/groq";
-import { checkFormatAndSummarize } from "@/lib/segmented-summarize";
+import { isJobCancelled } from "@/lib/check-cancelled";
+import {
+  TranscribeCancelledError,
+  transcribeWithGroq,
+} from "@/lib/transcribe-audio";
+import { audioExists, deleteAudio } from "@/lib/audio-storage";
+import { deduplicateParagraphs } from "@/lib/groq";
+import { truncateSummarySections } from "@/lib/summary-format";
 
 /** Allow long-running summarization. */
 export const maxDuration = 7200;
@@ -62,15 +75,18 @@ export async function POST(
       return NextResponse.json({ error: "Job already completed" }, { status: 400 });
     }
 
-    const text = resumableJob.extractedTextForRetry;
-    if (!text?.trim()) {
+    let text: string | null = resumableJob.extractedTextForRetry;
+    const hasTranscriptionResume =
+      resumableJob.audioPath && audioExists(resumableJob.audioPath);
+
+    if (!text?.trim() && !hasTranscriptionResume) {
       return NextResponse.json(
-        { error: "Job cannot be resumed: no extracted text saved." },
+        { error: "Job cannot be resumed: no extracted text or audio saved." },
         { status: 400 }
       );
     }
 
-    let context: { flow?: string } = {};
+    let context: { flow?: string; isAudio?: boolean } = {};
     try {
       if (resumableJob.jobRetryContext) {
         context = JSON.parse(resumableJob.jobRetryContext) as { flow?: string };
@@ -102,12 +118,15 @@ export async function POST(
           updates: Prisma.SummaryJobUpdateInput & {
             processedChunks?: number;
             partialSummary?: string;
+            processedTranscribeChunks?: number;
+            partialTranscript?: string | null;
+            audioPath?: string | null;
           }
         ) => {
           try {
             await prisma.summaryJob.update({
               where: { id: jobId },
-              data: updates as Prisma.SummaryJobUpdateInput,
+              data: updates as Record<string, unknown>,
             });
           } catch (e) {
             console.error("SummaryJob resume update failed:", e);
@@ -117,20 +136,98 @@ export async function POST(
         try {
           await updateJob({ status: "processing" });
 
-          if (context.flow === "summarize") {
-            if (text.length <= SUMMARIZE_CHUNK_SIZE) {
+          // Resume from transcription if we have audio but no extracted text yet
+          if (!text?.trim() && hasTranscriptionResume && resumableJob.audioPath) {
+            let initialTranscripts: string[] = [];
+            try {
+              if (resumableJob.partialTranscript) {
+                initialTranscripts = JSON.parse(resumableJob.partialTranscript) as string[];
+              }
+            } catch {
+              initialTranscripts = resumableJob.partialTranscript ? [resumableJob.partialTranscript] : [];
+            }
+            const startFromChunk = resumableJob.processedTranscribeChunks ?? 0;
+            const buffer = fs.readFileSync(resumableJob.audioPath);
+
+            send({
+              type: "progress",
+              phase: "transcribing",
+              current: startFromChunk,
+              total: 0,
+              message: `Melanjutkan transkripsi dari bagian ${startFromChunk + 1}…`,
+            });
+
+            try {
+              text = await transcribeWithGroq(buffer, apiKey, {
+                language: "id",
+                fileName: resumableJob.filename,
+                startFromChunk,
+                initialTranscripts,
+                isCancelled: () => isJobCancelled(jobId),
+                onChunkProgress: (current, total) => {
+                  send({
+                    type: "progress",
+                    phase: "transcribing",
+                    current,
+                    total,
+                    message: `Transkripsi bagian ${current} dari ${total}…`,
+                  });
+                },
+                onChunkDone: async (chunkIndex, _t, transcriptsSoFar) => {
+                  await updateJob({
+                    processedTranscribeChunks: chunkIndex,
+                    partialTranscript: JSON.stringify(transcriptsSoFar),
+                  });
+                },
+              });
+            } catch (transcribeErr) {
+              if (transcribeErr instanceof TranscribeCancelledError) {
+                controller.close();
+                return;
+              }
+              throw transcribeErr;
+            }
+
+            if (!text?.trim()) {
+              await updateJob({ status: "failed", errorMessage: "No speech could be transcribed." });
+              send({ type: "error", message: "No speech could be transcribed from the audio." });
+              controller.close();
+              return;
+            }
+            text = deduplicateParagraphs(text);
+            await updateJob({
+              extractedTextForRetry: text,
+              jobRetryContext: JSON.stringify({ flow: "summarize", isAudio: true }),
+            });
+          }
+
+          const finalText = text!.trim();
+          if (!finalText) {
+            await updateJob({ status: "failed", errorMessage: "No text to summarize." });
+            send({ type: "error", message: "No text to summarize." });
+            controller.close();
+            return;
+          }
+
+          // All jobs use summarize flow (chunk + merge). Segmented flow removed.
+          if (finalText.length <= SUMMARIZE_CHUNK_SIZE) {
               send({ type: "progress", phase: "summarizing", message: "Merangkum…" });
-              const summary = await summarizeWithGroq(text, apiKey);
-              const finalSummary = deduplicateSummaryPoints(summary || "Rangkuman tidak dapat dibuat.");
+              const summary = await summarizeWithGroq(finalText, apiKey);
+              let finalSummary = deduplicateSummaryPoints(summary || "Rangkuman tidak dapat dibuat.");
+              finalSummary = truncateSummarySections(finalSummary, 40);
               await updateJob({
                 status: "completed",
                 progressPercentage: 100,
                 summaryText: finalSummary,
-                errorMessage: { set: null },
-                retryAfter: { set: null },
-                extractedTextForRetry: { set: null },
-                jobRetryContext: { set: null },
+                errorMessage: null,
+                retryAfter: null,
+                extractedTextForRetry: null,
+                jobRetryContext: null,
+                audioPath: null,
+                partialTranscript: null,
+                processedTranscribeChunks: 0,
               });
+              if (resumableJob.audioPath) deleteAudio(resumableJob.audioPath);
               send({ type: "summary", text: finalSummary });
             } else {
               let initialSummaries: string[] = [];
@@ -142,7 +239,7 @@ export async function POST(
                 }
               }
               const startFromChunk = resumableJob.processedChunks ?? 0;
-              const chunks = splitIntoChunks(text, SUMMARIZE_CHUNK_SIZE);
+              const chunks = splitIntoChunks(finalText, SUMMARIZE_CHUNK_SIZE);
               const total = chunks.length;
 
               send({
@@ -155,6 +252,10 @@ export async function POST(
 
               const accumulatedSummaries = [...initialSummaries];
               for (let i = startFromChunk; i < chunks.length; i++) {
+                if (await isJobCancelled(jobId)) {
+                  controller.close();
+                  return;
+                }
                 const part = await summarizeWithGroq(chunks[i], apiKey, { isChunk: true });
                 accumulatedSummaries.push(part);
                 await updateJob({
@@ -173,85 +274,63 @@ export async function POST(
                 }
               }
 
+              if (await isJobCancelled(jobId)) {
+                controller.close();
+                return;
+              }
               send({ type: "progress", phase: "merge", message: "Menggabungkan rangkuman…" });
               await sleep(SUMMARIZE_MERGE_PRE_DELAY_MS);
-              const summary = await mergeSummaries(accumulatedSummaries, apiKey);
-              const finalSummary = deduplicateSummaryPoints(summary || "Rangkuman tidak dapat dibuat.");
+              const summary = await mergeSummaries(
+                accumulatedSummaries,
+                apiKey,
+                (cur, tot) => {
+                  send({
+                    type: "progress",
+                    phase: "merge",
+                    current: cur,
+                    total: tot,
+                    message:
+                      tot > 1
+                        ? `Menggabungkan bagian ${cur} dari ${tot}…`
+                        : "Menggabungkan rangkuman…",
+                  });
+                }
+              );
+              let finalSummary = deduplicateSummaryPoints(summary || "Rangkuman tidak dapat dibuat.");
+              finalSummary = truncateSummarySections(finalSummary, 40);
               await updateJob({
                 status: "completed",
                 progressPercentage: 100,
                 summaryText: finalSummary,
-                errorMessage: { set: null },
-                retryAfter: { set: null },
-                extractedTextForRetry: { set: null },
-                jobRetryContext: { set: null },
+                errorMessage: null,
+                retryAfter: null,
+                extractedTextForRetry: null,
+                jobRetryContext: null,
+                audioPath: null,
+                partialTranscript: null,
+                processedTranscribeChunks: 0,
               });
+              if (resumableJob.audioPath) deleteAudio(resumableJob.audioPath);
               send({ type: "summary", text: finalSummary });
             }
-          } else {
-            let initialSummaries: string[] = [];
-            if (resumableJob.partialSummary) {
-              try {
-                initialSummaries = JSON.parse(resumableJob.partialSummary) as string[];
-              } catch {
-                initialSummaries = resumableJob.partialSummary ? [resumableJob.partialSummary] : [];
-              }
-            }
-            const startFromChunk = resumableJob.processedChunks ?? 0;
-
-            send({
-              type: "progress",
-              step: 3,
-              stepLabel: "Rangkuman",
-              message: `Melanjutkan dari bagian ${startFromChunk + 1}…`,
-            });
-
-            const accumulatedSummaries = [...initialSummaries];
-            const result = await checkFormatAndSummarize(text, apiKey, send, {
-              startFromChunk,
-              initialSummaries,
-              onChunkComplete: async (chunkIndex, part, totalChunks) => {
-                accumulatedSummaries.push(part);
-                await updateJob({
-                  processedChunks: chunkIndex + 1,
-                  partialSummary: JSON.stringify(accumulatedSummaries),
-                });
-              },
-            });
-
-            if ("error" in result) {
-              if (result.isRateLimit) {
-                const retryAfter = new Date(Date.now() + 60 * 60 * 1000);
-                await prisma.summaryJob.update({
-                  where: { id: jobId },
-                  data: { status: "waiting_rate_limit", retryAfter },
-                });
-                send({
-                  type: "waiting_rate_limit",
-                  message: "Groq rate limit reached. Job will retry automatically in about 1 hour.",
-                  retryAfter: retryAfter.toISOString(),
-                });
-              } else {
-                await updateJob({ status: "failed", errorMessage: result.error });
-                send({ type: "error", message: result.error });
-              }
-              controller.close();
-              return;
-            }
-
-            await updateJob({
-              status: "completed",
-              progressPercentage: 100,
-              summaryText: result.summary,
-              errorMessage: { set: null },
-              retryAfter: { set: null },
-              extractedTextForRetry: { set: null },
-              jobRetryContext: { set: null },
-            });
-            send({ type: "summary", text: result.summary });
-          }
         } catch (err) {
           console.error("Resume summarization error:", err);
+          if (isGroqRateLimitError(err)) {
+            const retryAfterMs = Math.max(err.retryAfterMs, 60 * 60 * 1000);
+            const retryAfter = new Date(Date.now() + retryAfterMs);
+            await updateJob({
+              status: "waiting_rate_limit",
+              retryAfter,
+              errorMessage: null,
+            });
+            send({
+              type: "waiting_rate_limit",
+              message:
+                "Groq rate limit reached. Job will retry automatically in about 1 hour.",
+              retryAfter: retryAfter.toISOString(),
+            });
+            return;
+          }
           const message = err instanceof Error ? err.message : "Resume failed.";
           await updateJob({ status: "failed", errorMessage: message });
           send({ type: "error", message });

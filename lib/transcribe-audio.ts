@@ -166,11 +166,27 @@ async function transcribeSingleChunk(
   throw lastError;
 }
 
+/** Thrown when transcription is stopped due to job cancellation. */
+export class TranscribeCancelledError extends Error {
+  constructor(public readonly partialTranscripts: string[]) {
+    super("Transcription cancelled");
+    this.name = "TranscribeCancelledError";
+  }
+}
+
 export interface TranscribeOptions {
   language?: string;
   fileName?: string;
   /** Called when chunk N of total is being transcribed (for progress UI). */
   onChunkProgress?: (current: number, total: number) => void;
+  /** Called after each chunk is transcribed (for saving partial progress). */
+  onChunkDone?: (chunkIndex: number, transcript: string, transcriptsSoFar: string[]) => void | Promise<void>;
+  /** If true, stop and throw TranscribeCancelledError with partial transcripts. */
+  isCancelled?: () => Promise<boolean>;
+  /** Skip chunks before this index (for resume). */
+  startFromChunk?: number;
+  /** Pre-filled transcripts from previous run (for resume). */
+  initialTranscripts?: string[];
 }
 
 /**
@@ -178,7 +194,7 @@ export interface TranscribeOptions {
  * Long audio (>5 min or >8 MB) is chunked to avoid 524 timeout.
  * @param buffer - Raw audio file buffer
  * @param apiKey - Groq API key
- * @param options - Optional language hint, filename, and progress callback
+ * @param options - Optional language hint, filename, progress callback, cancellation check
  */
 export async function transcribeWithGroq(
   buffer: Buffer,
@@ -186,6 +202,8 @@ export async function transcribeWithGroq(
   options?: TranscribeOptions
 ): Promise<string> {
   const fileName = options?.fileName ?? "audio.mp3";
+  const startFrom = options?.startFromChunk ?? 0;
+  const initialTranscripts = options?.initialTranscripts ?? [];
 
   let chunks: { buffer: Buffer }[];
   let cleanup: () => void = () => {};
@@ -200,10 +218,13 @@ export async function transcribeWithGroq(
   }
 
   try {
-    const transcripts: string[] = [];
+    const transcripts = [...initialTranscripts];
     const total = chunks.length;
-    for (let i = 0; i < chunks.length; i++) {
-      if (i > 0) await sleep(TRANSCRIBE_CHUNK_DELAY_MS);
+    for (let i = startFrom; i < chunks.length; i++) {
+      if (options?.isCancelled && (await options.isCancelled())) {
+        throw new TranscribeCancelledError(transcripts);
+      }
+      if (i > startFrom) await sleep(TRANSCRIBE_CHUNK_DELAY_MS);
       options?.onChunkProgress?.(i + 1, total);
       const chunk = chunks[i];
       const chunkFileName =
@@ -215,6 +236,7 @@ export async function transcribeWithGroq(
       if (text.trim()) {
         transcripts.push(text.trim());
       }
+      await options?.onChunkDone?.(i + 1, text.trim(), [...transcripts]);
     }
     return transcripts.join("\n\n");
   } finally {

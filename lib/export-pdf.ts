@@ -13,7 +13,8 @@ export function prepareContentForPdf(text: string): string {
     .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, "")
     .replace(/\n{3,}/g, "\n\n")
     .replace(/^#+\s*/gm, "")
-    .replace(/^(\s*)[-*]\s+/gm, "$1• ");
+    .replace(/^(\s*)[-*]\s+/gm, "$1• ")
+    .replace(/(:\*\*)\s*\n+/g, "$1 ");
 }
 
 /** Split text into segments alternating between normal and bold (from **...**). */
@@ -72,13 +73,23 @@ export function renderPdfContent(
     doc.setFont("helvetica", bold ? "bold" : "normal");
     doc.setFontSize(fontSize);
 
-    const availableWidth = maxWidth - (x - margin);
+    let drawX = x;
+    let availableWidth = maxWidth - (x - margin);
+
+    if (availableWidth <= 10) {
+      drawX = margin;
+      availableWidth = maxWidth;
+      y += lineHeight;
+      addPageIfNeeded();
+    }
+
     const wrapped = doc.splitTextToSize(text, availableWidth);
 
-    if (wrapped.length === 0) return { nextX: x, nextY: y };
+    if (wrapped.length === 0) return { nextX: drawX, nextY: y };
 
-    doc.text(wrapped[0], x, y);
-    let nextX = x + doc.getTextWidth(wrapped[0]);
+    doc.text(wrapped[0], drawX, y);
+    const firstLineWidth = doc.getTextDimensions(wrapped[0]).w;
+    let nextX = drawX + firstLineWidth;
     let nextY = y;
 
     for (let i = 1; i < wrapped.length; i++) {
@@ -88,7 +99,7 @@ export function renderPdfContent(
         nextY = opts.margin;
       }
       doc.text(wrapped[i], margin, nextY);
-      nextX = margin + doc.getTextWidth(wrapped[i]);
+      nextX = margin;
     }
     y = nextY;
     return { nextX, nextY };
@@ -107,7 +118,6 @@ export function renderPdfContent(
     if (segments.length === 0) continue;
 
     let x = margin;
-
     for (const seg of segments) {
       addPageIfNeeded();
       const { nextX, nextY } = drawSegment(seg.text, seg.bold, x);
@@ -118,8 +128,8 @@ export function renderPdfContent(
     y += lineHeight;
 
     const isHeading =
-      line.match(/^\*\*[^*]+\*\*:?\s*$/) ||
-      (line.match(/^\d+\.\s*\*\*[^*]+\*\*:?\s*$/) && line.length < 80);
+      !!line.match(/^(\*\*[^*]+\*\*\s*)+:?\s*$/) ||
+      !!(line.match(/^\d+\.\s*\*\*[^*]+\*\*:?\s*$/) && line.length < 80);
     if (isHeading) {
       y += headingSpacing;
     }

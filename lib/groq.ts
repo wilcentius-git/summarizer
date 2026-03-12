@@ -201,11 +201,11 @@ Ringkasan poin penutup. Boleh tambahkan insight Anda sendiri: analisis, rekomend
 Notulis, Ketua Tim.
 
 UNTUK DOKUMEN BUKAN RAPAT (buku, artikel, pedoman, transkrip podcast/video):
-Gunakan format terstruktur dengan MARKDOWN (mirip format rapat):
+PENTING: Ringkasan Eksekutif dan Insight tambahan MAKSIMAL 40 kata masing-masing.
 
 **Ringkasan Eksekutif:**
 
-[Maksimal 50 kata yang merangkum inti dokumen: topik utama, poin kunci, kesimpulan utama.]
+[40 kata atau kurang: topik utama, poin kunci, kesimpulan utama]
 
 **Rangkuman:**
 
@@ -216,10 +216,9 @@ Gunakan format terstruktur dengan MARKDOWN (mirip format rapat):
 
 **Insight tambahan:**
 
-Maksimal 50 kata total. 2–3 insight singkat yang actionable (analisis, rekomendasi, observasi yang relevan).
+[40 kata atau kurang: 2–3 insight singkat yang actionable]
 
-- Output HANYA 3 bagian: (1) Ringkasan Eksekutif, (2) Rangkuman (satu daftar bernomor saja), (3) Insight tambahan. JANGAN tambahkan Kesimpulan, Ringkasan, atau sub-bagian "Rangkasan [topik]".
-- WAJIB: Beri baris kosong (satu enter) antara judul section (**Ringkasan Eksekutif:**, **Rangkuman:**, **Insight tambahan:**) dan isi kontennya.
+- Output HANYA 3 bagian. Beri baris kosong antara judul dan isi.
 - JANGAN gunakan format notula (Metadata, Peserta Rapat, Acara, dll.) untuk dokumen ini.
 - Variasikan frasa: jangan ulangi "penulis berpendapat" berkali-kali; gunakan "menurut penulis", "penulis menyatakan", "penulis mengemukakan", dll.
 - KONSOLIDASI: Gabungkan poin yang mirip menjadi satu. Jangan ulangi ide yang sama.
@@ -240,7 +239,7 @@ Dokumen:
 const SUMMARIZE_CHUNK_PROMPT = `Rangkum bagian berikut secara ringkas dalam Bahasa Indonesia.
 - Fokus pada poin-poin penting dan UNIK. Poin yang sama hanya disebut SATU KALI. Gabungkan ide mirip; jangan ulangi di paragraf berbeda.
 - Jika bagian ini dari notula/pertemuan (ada peserta, jalannya rapat, diskusi): PERTAHANKAN nama orang, organisasi/unit, detail teknis. Gunakan format: daftar bernomor (1., 2.) dan sub-list huruf (a., b., c.). Bold (**) untuk nama orang, organisasi, istilah teknis.
-- Jika bagian ini dari buku/artikel/podcast: gunakan format HANYA 3 bagian: **Ringkasan Eksekutif** (maksimal 50 kata), **Rangkuman** (daftar bernomor 1., 2., 3.), **Insight tambahan** (maksimal 50 kata). Beri baris kosong antara judul dan isi. JANGAN tambahkan Kesimpulan atau Rangkasan per topik. Variasikan frasa (jangan ulangi "penulis berpendapat" berkali-kali).
+- Jika bagian ini dari buku/artikel/podcast: format 3 bagian—**Ringkasan Eksekutif** (MAKSIMAL 40 kata), **Rangkuman** (daftar bernomor), **Insight tambahan** (MAKSIMAL 40 kata). Beri baris kosong antara judul dan isi.
 - Hindari kata "juga" di awal atau akhir kalimat. Variasikan struktur kalimat.
 - Perbaiki typo umum (mis. "menafigasi" → "menavigasi").
 - Tanpa pembukaan, langsung rangkuman saja. Pastikan kalimat terakhir selesai lengkap.
@@ -249,19 +248,21 @@ Bagian:
 
 `;
 
-const SUMMARIZE_MERGE_PROMPT = `Input di bawah terdiri dari BEBERAPA rangkuman per bagian (setiap bagian punya Ringkasan Eksekutif, Rangkuman, Insight tambahan). Ini dari dokumen yang sama yang dipotong menjadi beberapa chunk.
+const SUMMARIZE_MERGE_PROMPT = `PENTING: Ringkasan Eksekutif dan Insight tambahan MAKSIMAL 40 kata masing-masing. JANGAN lebih.
 
-Tugas Anda: GABUNGKAN semuanya menjadi SATU rangkuman final. Output HANYA:
-- SATU **Ringkasan Eksekutif** (sintesis semua bagian, maksimal 50 kata)
-- SATU **Rangkuman** (satu daftar bernomor 1., 2., 3., ... gabungkan semua poin)
-- SATU **Insight tambahan** (gabungkan insight terbaik dari semua bagian, maksimal 50 kata total)
+Input di bawah terdiri dari BEBERAPA rangkuman per bagian. Gabungkan menjadi SATU rangkuman final.
 
-JANGAN output ulang setiap blok. JANGAN ada lebih dari satu Ringkasan Eksekutif, satu Rangkuman, atau satu Insight tambahan. WAJIB: Beri baris kosong antara judul section dan isi kontennya.
+Output HANYA:
+- SATU **Ringkasan Eksekutif** (pilih HANYA poin paling penting, MAKSIMAL 40 kata)
+- SATU **Rangkuman** (daftar bernomor 1., 2., 3., ... gabungkan semua poin)
+- SATU **Insight tambahan** (pilih HANYA insight terbaik, MAKSIMAL 40 kata total)
 
-ATURAN PENTING:
+Beri baris kosong antara judul section dan isi. Buang informasi kurang penting—prioritaskan yang esensial saja.
+
+ATURAN:
 - DEDUPLIKASI: Poin yang sama atau mirip hanya perlu disebut SATU KALI. Gabungkan ide mirip menjadi satu; jangan ulangi di paragraf berbeda.
 - Format RAPAT/NOTULA hanya jika rangkuman per bagian JELAS berisi rapat/pertemuan (peserta, jalannya rapat, diskusi). Gabungkan ke format terstruktur dengan MARKDOWN: **bold** untuk heading dan istilah penting, daftar bernomor (1., 2.) dan sub-list huruf (a., b., c.). Pertahankan nama orang dan detail teknis. Untuk **Kesimpulan**: boleh tambahkan insight Anda sendiri (analisis, rekomendasi, observasi) yang relevan.
-- Jika rangkuman berisi buku/artikel/podcast (tidak ada peserta rapat, jalannya rapat): Output WAJIB tepat 3 bagian—**Ringkasan Eksekutif**, **Rangkuman**, **Insight tambahan**. Ringkasan Eksekutif dan Insight tambahan masing-masing maksimal 50 kata. Gabungkan semua poin dari tiap bagian ke dalam SATU daftar bernomor. Sintesis semua Ringkasan Eksekutif menjadi satu paragraf singkat. Gabungkan insight menjadi satu blok singkat. JANGAN output blok Ringkasan Eksekutif/Rangkuman/Insight lebih dari sekali.
+- Jika rangkuman berisi buku/artikel/podcast: Output 3 bagian—**Ringkasan Eksekutif**, **Rangkuman**, **Insight tambahan**. Ringkasan Eksekutif dan Insight tambahan MAKSIMAL 40 kata. Pilih poin paling penting saja; buang sisanya.
 - Hindari kata "juga" di awal atau akhir kalimat. Variasikan kata penghubung dan frasa (selain itu, selanjutnya, menurut penulis, dll.) - jangan gunakan "penulis berpendapat" berulang kali.
 - Perbaiki typo umum (mis. "menafigasi" → "menavigasi").
 - Pastikan rangkuman selesai LENGKAP; jangan potong di tengah kalimat atau paragraf.
@@ -325,11 +326,15 @@ export function getGroqUserFriendlyError(status: number): string | null {
   return null;
 }
 
-/** Parse "try again in X.XXs" from Groq 429 error. Returns ms to wait, or default. */
+/** Parse "try again in X.XXs" or "try again in Xms" from Groq 429 error. Returns ms to wait, or default. */
 export function parseRetryAfterMs(errBody: string, defaultMs: number): number {
-  const match = errBody.match(/try again in ([\d.]+)s/i);
-  if (match) {
-    const sec = parseFloat(match[1]);
+  const msMatch = errBody.match(/try again in (\d+)ms/i);
+  if (msMatch) {
+    return Math.ceil(parseInt(msMatch[1], 10)) + 500;
+  }
+  const secMatch = errBody.match(/try again in ([\d.]+)s/i);
+  if (secMatch) {
+    const sec = parseFloat(secMatch[1]);
     return Math.ceil(sec * 1000) + 1000;
   }
   return defaultMs;

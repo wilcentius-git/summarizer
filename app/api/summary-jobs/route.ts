@@ -29,14 +29,16 @@ export async function GET() {
         totalChunks: true,
         processedChunks: true,
         extractedTextForRetry: true,
+        audioPath: true,
+        partialTranscript: true,
       },
     });
 
-    const jobs = rows.map(({ extractedTextForRetry, ...rest }) => ({
+    const jobs = rows.map(({ extractedTextForRetry, audioPath, partialTranscript, ...rest }) => ({
       ...rest,
       isResumable:
-        !!extractedTextForRetry &&
-        rest.status !== "completed",
+        rest.status !== "completed" &&
+        (!!extractedTextForRetry || !!audioPath),
     }));
 
     return NextResponse.json({ jobs });

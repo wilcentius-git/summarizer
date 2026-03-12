@@ -33,6 +33,9 @@ model SummaryJob {
   extractedTextForRetry String?   @map("extracted_text_for_retry")
   jobRetryContext       String?   @map("job_retry_context") // JSON: { flow, leaderName?, leaderPosition? }
   resumeToken           String?   @unique @map("resume_token") // Secret token for resume without login
+  processedTranscribeChunks Int   @default(0) @map("processed_transcribe_chunks")
+  partialTranscript     String?   @map("partial_transcript") // JSON array of transcript chunks
+  audioPath             String?   @map("audio_path") // Path to stored audio for resume-from-transcription
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { prisma } from "@/lib/prisma";
 import { verifyToken } from "@/lib/auth";
+import { deleteAudio } from "@/lib/audio-storage";
 
 export async function DELETE(
   _request: NextRequest,
@@ -19,12 +20,14 @@ export async function DELETE(
 
     const job = await prisma.summaryJob.findFirst({
       where: { id, userId: payload.userId },
+      select: { id: true, audioPath: true },
     });
 
     if (!job) {
       return NextResponse.json({ error: "Job not found" }, { status: 404 });
     }
 
+    if (job.audioPath) deleteAudio(job.audioPath);
     await prisma.summaryJob.delete({
       where: { id },
     });

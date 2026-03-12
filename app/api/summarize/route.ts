@@ -9,6 +9,7 @@ import {
   isSupportedMimeType,
   resolveMimeType,
 } from "@/lib/extract-text";
+import { isJobCancelled } from "@/lib/check-cancelled";
 import {
   createOcrFallback,
   deduplicateParagraphs,
@@ -24,13 +25,16 @@ import {
   splitIntoChunks,
   summarizeWithGroq,
 } from "@/lib/groq";
+import { truncateSummarySections } from "@/lib/summary-format";
 import {
   isAudioFileName,
   isAudioMimeType,
   MAX_AUDIO_SIZE_BYTES,
   resolveAudioMimeType,
+  TranscribeCancelledError,
   transcribeWithGroq,
 } from "@/lib/transcribe-audio";
+import { deleteAudio, saveAudio } from "@/lib/audio-storage";
 
 function sendStreamLine(controller: ReadableStreamDefaultController<Uint8Array>, obj: object) {
   const encoder = new TextEncoder();
@@ -134,6 +138,9 @@ export async function POST(request: NextRequest) {
         totalChunks?: number;
         processedChunks?: number;
         partialSummary?: string;
+        processedTranscribeChunks?: number;
+        partialTranscript?: string;
+        audioPath?: string;
       }) => {
         try {
           await prisma.summaryJob.update({
@@ -164,8 +171,11 @@ export async function POST(request: NextRequest) {
         const buffer = Buffer.from(await file.arrayBuffer());
         let text: string;
 
+        let audioPathToCleanup: string | null = null;
         if (isAudio) {
-          await updateJob({ progressPercentage: 15 });
+          const savedPath = await saveAudio(job.id, fileName, buffer);
+          audioPathToCleanup = savedPath;
+          await updateJob({ progressPercentage: 15, audioPath: savedPath });
           send({
             type: "progress",
             phase: "transcribing",
@@ -175,24 +185,41 @@ export async function POST(request: NextRequest) {
             step: 1,
             stepLabel: "Transkripsi",
           });
-          text = await transcribeWithGroq(buffer, apiKey, {
-            language: "id",
-            fileName,
-            onChunkProgress: (current, total) => {
-              send({
-                type: "progress",
-                phase: "transcribing",
-                current,
-                total,
-                message:
-                  total > 1
-                  ? `Transkripsi bagian ${current} dari ${total}…`
-                  : "Mengirim ke Groq Whisper untuk transkripsi…",
-                step: 1,
-                stepLabel: "Transkripsi",
-              });
-            },
-          });
+          try {
+            text = await transcribeWithGroq(buffer, apiKey, {
+              language: "id",
+              fileName,
+              isCancelled: () => isJobCancelled(job.id),
+              onChunkProgress: (current, total) => {
+                send({
+                  type: "progress",
+                  phase: "transcribing",
+                  current,
+                  total,
+                  message:
+                    total > 1
+                    ? `Transkripsi bagian ${current} dari ${total}…`
+                    : "Mengirim ke Groq Whisper untuk transkripsi…",
+                  step: 1,
+                  stepLabel: "Transkripsi",
+                });
+              },
+              onChunkDone: async (chunkIndex, _transcript, transcriptsSoFar) => {
+                await updateJob({
+                  processedTranscribeChunks: chunkIndex,
+                  partialTranscript: JSON.stringify(transcriptsSoFar),
+                });
+              },
+            });
+          } catch (transcribeErr) {
+            if (transcribeErr instanceof TranscribeCancelledError) {
+              await updateJob({ status: "cancelled" });
+              send({ type: "cancelled", message: "Dibatalkan." });
+              controller.close();
+              return;
+            }
+            throw transcribeErr;
+          }
         } else {
           const ocrFallback =
             resolvedMime === "application/pdf" ? createOcrFallback(apiKey) : undefined;
@@ -254,6 +281,10 @@ export async function POST(request: NextRequest) {
 
             const chunkSummaries: string[] = [];
             for (let i = 0; i < chunks.length; i++) {
+              if (await isJobCancelled(job.id)) {
+                controller.close();
+                return;
+              }
               const part = await summarizeWithGroq(chunks[i], apiKey, {
                 isChunk: true,
               });
@@ -276,6 +307,10 @@ export async function POST(request: NextRequest) {
               }
             }
 
+            if (await isJobCancelled(job.id)) {
+              controller.close();
+              return;
+            }
             send({
               type: "progress",
               phase: "merge",
@@ -301,11 +336,13 @@ export async function POST(request: NextRequest) {
 
           if (!summary) summary = "Rangkuman tidak dapat dibuat.";
           summary = deduplicateSummaryPoints(summary);
+          summary = truncateSummarySections(summary, 40);
           await updateJob({
             status: "completed",
             progressPercentage: 100,
             summaryText: summary,
           });
+          if (audioPathToCleanup) deleteAudio(audioPathToCleanup);
           send({ type: "summary", text: summary });
         } catch (groqErr) {
           if (isGroqRateLimitError(groqErr)) {
@@ -316,6 +353,7 @@ export async function POST(request: NextRequest) {
               extractedTextForRetry: text,
               jobRetryContext: JSON.stringify({ flow: "summarize", isAudio }),
             });
+            if (audioPathToCleanup) deleteAudio(audioPathToCleanup);
             send({
               type: "waiting_rate_limit",
               message: "Groq rate limit reached. Job will retry automatically in about 1 hour.",

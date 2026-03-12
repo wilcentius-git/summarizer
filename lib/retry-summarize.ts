@@ -5,7 +5,6 @@
 
 import type { SummaryJob } from "@prisma/client";
 
-import { prisma } from "@/lib/prisma";
 import {
   deduplicateSummaryPoints,
   isGroqRateLimitError,
@@ -17,14 +16,7 @@ import {
   splitIntoChunks,
   summarizeWithGroq,
 } from "@/lib/groq";
-import { checkFormatAndSummarize } from "@/lib/segmented-summarize";
-
-type JobRetryContext = {
-  flow: "summarize" | "segmented";
-  isAudio?: boolean;
-  leaderName?: string;
-  leaderPosition?: string;
-};
+import { truncateSummarySections } from "@/lib/summary-format";
 
 export async function processRateLimitedJob(
   job: SummaryJob,
@@ -35,39 +27,7 @@ export async function processRateLimitedJob(
     return { success: false, error: "No extracted text for retry." };
   }
 
-  let context: JobRetryContext = { flow: "summarize" };
-  try {
-    if (job.jobRetryContext) {
-      context = JSON.parse(job.jobRetryContext) as JobRetryContext;
-    }
-  } catch {
-    return { success: false, error: "Invalid job retry context." };
-  }
-
-  if (context.flow === "segmented") {
-    let initialSummaries: string[] = [];
-    if (job.partialSummary) {
-      try {
-        initialSummaries = JSON.parse(job.partialSummary) as string[];
-      } catch {
-        initialSummaries = job.partialSummary ? [job.partialSummary] : [];
-      }
-    }
-    const startFromChunk = job.processedChunks ?? 0;
-    const result = await checkFormatAndSummarize(text, apiKey, undefined, {
-      startFromChunk,
-      initialSummaries,
-    });
-    if ("error" in result) {
-      if (result.isRateLimit) {
-        return { success: false, error: "Rate limit hit again during retry." };
-      }
-      return { success: false, error: result.error };
-    }
-    return { success: true, summary: result.summary };
-  }
-
-  // flow === "summarize"
+  // All jobs use summarize flow (chunk + merge). Segmented flow removed.
   try {
     let summary: string;
     if (text.length <= SUMMARIZE_CHUNK_SIZE) {
@@ -95,6 +55,7 @@ export async function processRateLimitedJob(
       summary = await mergeSummaries(chunkSummaries, apiKey);
     }
     summary = deduplicateSummaryPoints(summary || "Rangkuman tidak dapat dibuat.");
+    summary = truncateSummarySections(summary, 40);
     return { success: true, summary };
   } catch (err) {
     if (isGroqRateLimitError(err)) {

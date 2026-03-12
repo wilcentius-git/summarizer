@@ -13,6 +13,7 @@
 
 # misc
 .DS_Store
+/uploads
 *.pem
 /case_example
 

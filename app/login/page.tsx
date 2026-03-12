@@ -1,13 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import Image from "next/image";
 import kemenkumLogo from "@/assets/kemenkum_logo.png";
 import { useAuth } from "@/app/contexts/AuthContext";
 
-export default function LoginPage() {
+function LoginForm() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -102,5 +102,19 @@ export default function LoginPage() {
         </p>
       </div>
     </main>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense
+      fallback={
+        <main className="min-h-screen bg-kemenkum-blue flex items-center justify-center py-12 px-4">
+          <div className="text-white">Memuat…</div>
+        </main>
+      }
+    >
+      <LoginForm />
+    </Suspense>
   );
 }

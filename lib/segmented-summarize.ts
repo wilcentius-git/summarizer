@@ -42,17 +42,23 @@ const SEGMENTED_SUMMARIZE_PROMPT = `Teks berikut memiliki format label dan opini
 
 Format output (WAJIB ikuti—HANYA 3 bagian):
 **Ringkasan Eksekutif:**
-[2–3 kalimat yang merangkum inti percakapan: topik utama, aktor utama, kesimpulan utama]
+
+[Maksimal 50 kata yang merangkum inti percakapan: topik utama, aktor utama, kesimpulan utama]
 
 **Rangkuman :**
+
 1. [Poin pertama sesuai urutan kronologis]
 2. [Poin kedua]
 3. [Poin ketiga]
 ... (lanjutkan dengan nomor berurutan)
 
-**Insight tambahan:** 2–3 insight yang actionable.
+**Insight tambahan:**
+
+Maksimal 50 kata total. 2–3 insight singkat yang actionable.
 
 Gunakan tata bahasa formal Indonesia ("Dengan demikian", "Oleh karena itu", "Dapat disimpulkan bahwa", "Perlu dilakukan", "Disarankan agar"). Daftar bernomor BERAKHIR sebelum Insight tambahan—jangan lanjutkan penomoran di dalam Insight tambahan. Format Insight tambahan TANPA nomor. JANGAN tambahkan Kesimpulan, Ringkasan, atau sub-bagian "Rangkasan [topik]".
+
+WAJIB: Beri baris kosong (satu enter) antara judul section (**Ringkasan Eksekutif:**, **Rangkuman :**, **Insight tambahan:**) dan isi kontennya.
 
 Aturan:
 - Gunakan sudut pandang orang ketiga (mis. "Pembicara menjelaskan...", "Peserta menyatakan..."). Jangan gunakan "saya", "kita", atau "anda".

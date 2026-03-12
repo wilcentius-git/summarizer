@@ -6,6 +6,10 @@ import ReactMarkdown from "react-markdown";
 
 import kemenkumLogo from "@/assets/kemenkum_logo.png";
 import { useAuth } from "@/app/contexts/AuthContext";
+import {
+  prepareContentForPdf,
+  renderPdfContent,
+} from "@/lib/export-pdf";
 
 const GROQ_API_KEY_CACHE_DURATION_MS = 60 * 60 * 1000; // 1 hour
 const GROQ_API_KEY_CACHE_KEY = "groqApiKeyCache";
@@ -676,23 +680,7 @@ export default function Home() {
       minute: "2-digit",
     });
 
-    /** Strip markdown for PDF output; preserve numbered list (1., 2., 3.). */
-    const stripMarkdown = (s: string) =>
-      s
-        .replace(/\*\*(.+?)\*\*/g, "$1")
-        .replace(/\*(.+?)\*/g, "$1")
-        .replace(/^#+\s*/gm, "")
-        .replace(/^(\s*)[-*]\s+/gm, "$1• ");
-
-    /** Fix overlapping: \r (carriage return) can cause overwriting; normalize to \n. */
-    const sanitizeForPdf = (s: string) =>
-      s
-        .replace(/\r\n/g, "\n")
-        .replace(/\r/g, "\n")
-        .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, "")
-        .replace(/\n{3,}/g, "\n\n");
-
-    const content = sanitizeForPdf(stripMarkdown(summary.text));
+    const content = prepareContentForPdf(summary.text);
     const baseName =
       summary.fileName?.replace(/\.[^.]+$/, "") ?? "document";
     const fileName = `${baseName}-summary.pdf`;
@@ -703,33 +691,37 @@ export default function Home() {
       const margin = 20;
       const maxWidth = 210 - margin * 2;
       const lineHeight = 6;
+      const paragraphSpacing = 4;
+      const headingSpacing = 2;
       const pageHeight = 297;
       const maxY = pageHeight - margin;
 
       let y = margin;
 
-      const addText = (text: string, fontSize = 11) => {
-        doc.setFontSize(fontSize);
-        const lines = doc.splitTextToSize(text, maxWidth);
-        for (const line of lines) {
-          if (y > maxY) {
-            doc.addPage();
-            y = margin;
-          }
-          doc.text(line, margin, y);
-          y += lineHeight;
-        }
-      };
-
       doc.setFont("helvetica", "normal");
       doc.setFontSize(10);
       doc.setTextColor(100, 100, 100);
-      addText(`Dokumen: ${summary.fileName ?? "—"}`, 10);
-      addText(`Tanggal dibuat: ${dateStr}`, 10);
+      const metaLines = doc.splitTextToSize(
+        `Dokumen: ${summary.fileName ?? "—"}\nTanggal dibuat: ${dateStr}`,
+        maxWidth
+      );
+      for (const line of metaLines) {
+        doc.text(line, margin, y);
+        y += lineHeight;
+      }
       y += 4;
+
       doc.setTextColor(0, 0, 0);
-      doc.setFontSize(11);
-      addText(content);
+      y = renderPdfContent(doc, content, {
+        margin,
+        maxWidth,
+        lineHeight,
+        paragraphSpacing,
+        headingSpacing,
+        maxY,
+        startY: y,
+        fontSize: 11,
+      });
 
       doc.save(fileName);
     } catch (err) {
@@ -746,19 +738,7 @@ export default function Home() {
   const exportHistoryJobToPdf = useCallback(
     async (text: string, filename: string) => {
       if (!text) return;
-      const stripMarkdown = (s: string) =>
-        s
-          .replace(/\*\*(.+?)\*\*/g, "$1")
-          .replace(/\*(.+?)\*/g, "$1")
-          .replace(/^#+\s*/gm, "")
-          .replace(/^(\s*)[-*]\s+/gm, "$1• ");
-      const sanitizeForPdf = (s: string) =>
-        s
-          .replace(/\r\n/g, "\n")
-          .replace(/\r/g, "\n")
-          .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, "")
-          .replace(/\n{3,}/g, "\n\n");
-      const content = sanitizeForPdf(stripMarkdown(text));
+      const content = prepareContentForPdf(text);
       const dateStr = new Date().toLocaleString("id-ID", {
         day: "numeric",
         month: "long",
@@ -774,30 +754,38 @@ export default function Home() {
         const margin = 20;
         const maxWidth = 210 - margin * 2;
         const lineHeight = 6;
+        const paragraphSpacing = 4;
+        const headingSpacing = 2;
         const pageHeight = 297;
         const maxY = pageHeight - margin;
+
         let y = margin;
-        const addText = (t: string, fontSize = 11) => {
-          doc.setFontSize(fontSize);
-          const lines = doc.splitTextToSize(t, maxWidth);
-          for (const line of lines) {
-            if (y > maxY) {
-              doc.addPage();
-              y = margin;
-            }
-            doc.text(line, margin, y);
-            y += lineHeight;
-          }
-        };
+
         doc.setFont("helvetica", "normal");
         doc.setFontSize(10);
         doc.setTextColor(100, 100, 100);
-        addText(`Dokumen: ${filename ?? "—"}`, 10);
-        addText(`Tanggal dibuat: ${dateStr}`, 10);
+        const metaLines = doc.splitTextToSize(
+          `Dokumen: ${filename ?? "—"}\nTanggal dibuat: ${dateStr}`,
+          maxWidth
+        );
+        for (const line of metaLines) {
+          doc.text(line, margin, y);
+          y += lineHeight;
+        }
         y += 4;
+
         doc.setTextColor(0, 0, 0);
-        doc.setFontSize(11);
-        addText(content);
+        y = renderPdfContent(doc, content, {
+          margin,
+          maxWidth,
+          lineHeight,
+          paragraphSpacing,
+          headingSpacing,
+          maxY,
+          startY: y,
+          fontSize: 11,
+        });
+
         doc.save(fileName);
       } catch (err) {
         setError("Gagal mendownload PDF. Coba lagi.");
@@ -1614,7 +1602,7 @@ export default function Home() {
                           </div>
                         </div>
                         {viewingJobId === job.id && job.summaryText && (
-                          <div className="mt-3 p-3 rounded-lg bg-gray-50 border border-gray-100 text-sm text-gray-900 max-h-[300px] overflow-y-auto">
+                          <div className="mt-3 p-3 rounded-lg bg-gray-50 border border-gray-100 text-gray-900 max-h-[400px] overflow-y-auto [&_h1]:text-xl [&_h1]:font-bold [&_h1]:mt-2 [&_h1]:mb-1 [&_h2]:text-lg [&_h2]:font-semibold [&_h2]:mt-3 [&_h2]:mb-1 [&_h3]:text-base [&_h3]:font-medium [&_h3]:mt-2 [&_h3]:mb-1 [&_p]:mb-2 [&_ul]:list-disc [&_ul]:pl-6 [&_ul]:mb-2 [&_ol]:list-decimal [&_ol]:pl-6 [&_ol]:mb-2 [&_li]:mb-0.5 [&_strong]:font-semibold">
                             <ReactMarkdown>{job.summaryText}</ReactMarkdown>
                           </div>
                         )}

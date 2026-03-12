@@ -1,7 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+
+/** Job with fields needed for resume (Prisma client may be out of sync with schema). */
+type ResumableJob = {
+  id: string;
+  status: string;
+  extractedTextForRetry: string | null;
+  jobRetryContext: string | null;
+  partialSummary?: string | null;
+  processedChunks?: number;
+};
 import { verifyToken } from "@/lib/auth";
 import {
   deduplicateSummaryPoints,
@@ -45,11 +56,13 @@ export async function POST(
       return NextResponse.json({ error: "Job not found" }, { status: 404 });
     }
 
-    if (job.status === "completed") {
+    const resumableJob = job as ResumableJob;
+
+    if (resumableJob.status === "completed") {
       return NextResponse.json({ error: "Job already completed" }, { status: 400 });
     }
 
-    const text = job.extractedTextForRetry;
+    const text = resumableJob.extractedTextForRetry;
     if (!text?.trim()) {
       return NextResponse.json(
         { error: "Job cannot be resumed: no extracted text saved." },
@@ -59,8 +72,8 @@ export async function POST(
 
     let context: { flow?: string } = {};
     try {
-      if (job.jobRetryContext) {
-        context = JSON.parse(job.jobRetryContext) as { flow?: string };
+      if (resumableJob.jobRetryContext) {
+        context = JSON.parse(resumableJob.jobRetryContext) as { flow?: string };
       }
     } catch {
       return NextResponse.json({ error: "Invalid job retry context." }, { status: 400 });
@@ -85,21 +98,16 @@ export async function POST(
           }
         };
 
-        const updateJob = async (updates: {
-          status?: string;
-          progressPercentage?: number;
-          summaryText?: string;
-          errorMessage?: string;
-          processedChunks?: number;
-          partialSummary?: string;
-          retryAfter?: Date | null;
-          extractedTextForRetry?: string | null;
-          jobRetryContext?: string | null;
-        }) => {
+        const updateJob = async (
+          updates: Prisma.SummaryJobUpdateInput & {
+            processedChunks?: number;
+            partialSummary?: string;
+          }
+        ) => {
           try {
             await prisma.summaryJob.update({
               where: { id: jobId },
-              data: updates,
+              data: updates as Prisma.SummaryJobUpdateInput,
             });
           } catch (e) {
             console.error("SummaryJob resume update failed:", e);
@@ -118,22 +126,22 @@ export async function POST(
                 status: "completed",
                 progressPercentage: 100,
                 summaryText: finalSummary,
-                errorMessage: null,
-                retryAfter: null,
-                extractedTextForRetry: null,
-                jobRetryContext: null,
+                errorMessage: { set: null },
+                retryAfter: { set: null },
+                extractedTextForRetry: { set: null },
+                jobRetryContext: { set: null },
               });
               send({ type: "summary", text: finalSummary });
             } else {
               let initialSummaries: string[] = [];
-              if (job.partialSummary) {
+              if (resumableJob.partialSummary) {
                 try {
-                  initialSummaries = JSON.parse(job.partialSummary) as string[];
+                  initialSummaries = JSON.parse(resumableJob.partialSummary) as string[];
                 } catch {
-                  initialSummaries = job.partialSummary ? [job.partialSummary] : [];
+                  initialSummaries = resumableJob.partialSummary ? [resumableJob.partialSummary] : [];
                 }
               }
-              const startFromChunk = job.processedChunks ?? 0;
+              const startFromChunk = resumableJob.processedChunks ?? 0;
               const chunks = splitIntoChunks(text, SUMMARIZE_CHUNK_SIZE);
               const total = chunks.length;
 
@@ -173,23 +181,23 @@ export async function POST(
                 status: "completed",
                 progressPercentage: 100,
                 summaryText: finalSummary,
-                errorMessage: null,
-                retryAfter: null,
-                extractedTextForRetry: null,
-                jobRetryContext: null,
+                errorMessage: { set: null },
+                retryAfter: { set: null },
+                extractedTextForRetry: { set: null },
+                jobRetryContext: { set: null },
               });
               send({ type: "summary", text: finalSummary });
             }
           } else {
             let initialSummaries: string[] = [];
-            if (job.partialSummary) {
+            if (resumableJob.partialSummary) {
               try {
-                initialSummaries = JSON.parse(job.partialSummary) as string[];
+                initialSummaries = JSON.parse(resumableJob.partialSummary) as string[];
               } catch {
-                initialSummaries = job.partialSummary ? [job.partialSummary] : [];
+                initialSummaries = resumableJob.partialSummary ? [resumableJob.partialSummary] : [];
               }
             }
-            const startFromChunk = job.processedChunks ?? 0;
+            const startFromChunk = resumableJob.processedChunks ?? 0;
 
             send({
               type: "progress",
@@ -235,10 +243,10 @@ export async function POST(
               status: "completed",
               progressPercentage: 100,
               summaryText: result.summary,
-              errorMessage: null,
-              retryAfter: null,
-              extractedTextForRetry: null,
-              jobRetryContext: null,
+              errorMessage: { set: null },
+              retryAfter: { set: null },
+              extractedTextForRetry: { set: null },
+              jobRetryContext: { set: null },
             });
             send({ type: "summary", text: result.summary });
           }

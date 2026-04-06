@@ -26,4 +26,7 @@ jobs:
         run: npm run lint
 
       - name: Build
+        env:
+          JWT_SECRET: ci-build-placeholder-do-not-use-in-production-32chars
+          NEXT_TELEMETRY_DISABLED: "1"
         run: npm run build

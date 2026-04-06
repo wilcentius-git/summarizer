@@ -1,11 +1,7 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { jwtVerify } from "jose";
-
-if (!process.env.JWT_SECRET) {
-  throw new Error("JWT_SECRET environment variable is required. Set it in .env.local");
-}
-const JWT_SECRET = new TextEncoder().encode(process.env.JWT_SECRET);
+import { getJwtSecretKey } from "@/lib/jwt-secret";
 
 const PUBLIC_PATHS = ["/login", "/register"];
 const AUTH_PATHS = ["/login", "/register"];
@@ -14,7 +10,7 @@ async function verifyAuth(request: NextRequest): Promise<boolean> {
   const token = request.cookies.get("auth-token")?.value;
   if (!token) return false;
   try {
-    await jwtVerify(token, JWT_SECRET);
+    await jwtVerify(token, getJwtSecretKey());
     return true;
   } catch {
     return false;

@@ -21,7 +21,6 @@ import {
   SUMMARIZE_CHUNK_DELAY_MS,
   SUMMARIZE_CHUNK_SIZE,
   SUMMARIZE_MERGE_PRE_DELAY_MS,
-  SUMMARIZE_MERGE_THRESHOLD,
   splitIntoChunks,
   summarizeWithGroq,
 } from "@/lib/groq";
@@ -56,7 +55,12 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized. Please log in." }, { status: 401 });
   }
 
-  const formData = await request.formData();
+  let formData: FormData;
+  try {
+    formData = await request.formData();
+  } catch {
+    return NextResponse.json({ error: "Invalid form data." }, { status: 400 });
+  }
   const apiKey = (formData.get("groqApiKey") as string)?.trim();
   const file = formData.get("file");
 
@@ -250,6 +254,19 @@ export async function POST(request: NextRequest) {
         });
 
         let summary: string;
+
+        if (isAudio) {
+          send({
+            type: "progress",
+            phase: "cooldown",
+            current: 0,
+            total: 1,
+            message: "Transkripsi selesai. Menunggu sebelum merangkum…",
+            step: 2,
+            stepLabel: "Menunggu",
+          });
+          await sleep(30_000);
+        }
 
         try {
           if (text.length <= SUMMARIZE_CHUNK_SIZE) {

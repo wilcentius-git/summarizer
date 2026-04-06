@@ -27,7 +27,6 @@ export async function processRateLimitedJob(
     return { success: false, error: "No extracted text for retry." };
   }
 
-  // All jobs use summarize flow (chunk + merge). Segmented flow removed.
   try {
     let summary: string;
     if (text.length <= SUMMARIZE_CHUNK_SIZE) {

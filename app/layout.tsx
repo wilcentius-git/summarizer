@@ -13,7 +13,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="id">
       <body className="antialiased min-h-screen bg-white text-gray-900">
         <AuthProvider>
           {children}

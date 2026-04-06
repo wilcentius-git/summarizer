@@ -32,8 +32,8 @@ export function deleteAudio(audioPath: string | null): void {
         fs.rmdirSync(dir);
       }
     }
-  } catch {
-    // Ignore cleanup errors
+  } catch (cleanupErr) {
+    console.error("Audio cleanup failed:", cleanupErr);
   }
 }
 

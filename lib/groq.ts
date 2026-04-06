@@ -6,12 +6,11 @@
 import type { PdfPageImage } from "@/lib/pdf-to-images";
 
 export const MAX_FILE_SIZE_BYTES = 500 * 1024 * 1024; // 500 MB
-export const MAX_TEXT_LENGTH = 30000;
-/** Chunk size for summarization (~1500 tokens). Keeps requests under Groq free tier 6K TPM. */
+/** Chunk size for summarization (~1500 tokens). Keeps requests under Groq free tier TPM. */
 export const SUMMARIZE_CHUNK_SIZE = 4500;
 /** Delay between chunk requests to avoid Groq TPM rate limit (429). */
 export const SUMMARIZE_CHUNK_DELAY_MS = 6000;
-/** Single merge when combined summaries fit. Stays under Groq free tier 6K TPM per request. */
+/** Single merge when combined summaries fit under this character limit. */
 export const SUMMARIZE_MERGE_THRESHOLD = 12000;
 /** Pause before merge to let rate limits recover after summarization phase. */
 export const SUMMARIZE_MERGE_PRE_DELAY_MS = 8000;
@@ -230,11 +229,7 @@ ATURAN UMUM:
 - Perbaiki typo umum (mis. "menafigasi" → "menavigasi").
 - Gunakan konten dari SEMUA halaman dokumen. Jangan hanya merangkum halaman terakhir.
 - Tanpa pembukaan lain, langsung rangkuman saja.
-- Pastikan rangkuman selesai lengkap; jangan potong di tengah kalimat.
-
-Dokumen:
-
-`;
+- Pastikan rangkuman selesai lengkap; jangan potong di tengah kalimat.`;
 
 const SUMMARIZE_CHUNK_PROMPT = `Rangkum bagian berikut secara ringkas dalam Bahasa Indonesia.
 - Fokus pada poin-poin penting dan UNIK. Poin yang sama hanya disebut SATU KALI. Gabungkan ide mirip; jangan ulangi di paragraf berbeda.
@@ -242,11 +237,7 @@ const SUMMARIZE_CHUNK_PROMPT = `Rangkum bagian berikut secara ringkas dalam Baha
 - Jika bagian ini dari buku/artikel/podcast: format 3 bagian—**Ringkasan Eksekutif** (MAKSIMAL 40 kata), **Rangkuman** (daftar bernomor), **Insight tambahan** (MAKSIMAL 40 kata). Beri baris kosong antara judul dan isi.
 - Hindari kata "juga" di awal atau akhir kalimat. Variasikan struktur kalimat.
 - Perbaiki typo umum (mis. "menafigasi" → "menavigasi").
-- Tanpa pembukaan, langsung rangkuman saja. Pastikan kalimat terakhir selesai lengkap.
-
-Bagian:
-
-`;
+- Tanpa pembukaan, langsung rangkuman saja. Pastikan kalimat terakhir selesai lengkap.`;
 
 const SUMMARIZE_MERGE_PROMPT = `PENTING: Ringkasan Eksekutif dan Insight tambahan MAKSIMAL 40 kata masing-masing. JANGAN lebih.
 
@@ -266,11 +257,7 @@ ATURAN:
 - Hindari kata "juga" di awal atau akhir kalimat. Variasikan kata penghubung dan frasa (selain itu, selanjutnya, menurut penulis, dll.) - jangan gunakan "penulis berpendapat" berulang kali.
 - Perbaiki typo umum (mis. "menafigasi" → "menavigasi").
 - Pastikan rangkuman selesai LENGKAP; jangan potong di tengah kalimat atau paragraf.
-- Tanpa pembukaan lain, langsung rangkuman saja. Output akhir: tepat satu blok **Ringkasan Eksekutif**, satu blok **Rangkuman**, satu blok **Insight tambahan**. Tidak boleh ada pengulangan struktur ini.
-
-Rangkuman per bagian:
-
-`;
+- Tanpa pembukaan lain, langsung rangkuman saja. Output akhir: tepat satu blok **Ringkasan Eksekutif**, satu blok **Rangkuman**, satu blok **Insight tambahan**. Tidak boleh ada pengulangan struktur ini.`;
 
 export function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
@@ -340,17 +327,28 @@ export function parseRetryAfterMs(errBody: string, defaultMs: number): number {
   return defaultMs;
 }
 
-export async function summarizeWithGroq(
-  content: string,
-  apiKey: string,
-  options?: { isChunk?: boolean; isMerge?: boolean }
-): Promise<string> {
-  const prompt = options?.isMerge
-    ? SUMMARIZE_MERGE_PROMPT + content
-    : options?.isChunk
-      ? SUMMARIZE_CHUNK_PROMPT + content
-      : SUMMARIZE_PROMPT + content;
+const REFINE_SYSTEM_PROMPT = `Anda adalah asisten perangkum dokumen yang memperbarui rangkuman secara bertahap.
 
+Aturan:
+- Pertahankan format dan struktur rangkuman saat ini (notula/rapat ATAU dokumen umum—jangan ubah jenis format).
+- Integrasikan informasi baru ke dalam rangkuman yang sudah ada secara alami.
+- DEDUPLIKASI: Poin yang sama atau mirip hanya disebut SATU KALI. Gabungkan ide mirip.
+- Tulis dalam Bahasa Indonesia. Istilah teknis tetap gunakan istilah aslinya.
+- Gunakan **bold** untuk nama orang, organisasi, istilah teknis.
+- Untuk format dokumen umum: **Ringkasan Eksekutif** dan **Insight tambahan** MAKSIMAL 40 kata masing-masing.
+- Hindari kata "juga" di awal atau akhir kalimat. Variasikan struktur kalimat.
+- Perbaiki typo umum (mis. "menafigasi" → "menavigasi").
+- Pastikan rangkuman selesai lengkap; jangan potong di tengah kalimat.
+- Tanpa pembukaan, langsung rangkuman saja.`;
+
+async function callGroqApi(
+  messages: Array<{ role: string; content: string }>,
+  apiKey: string,
+  options?: { model?: string; maxTokens?: number; temperature?: number }
+): Promise<string> {
+  const model = options?.model ?? GROQ_MODEL;
+  const maxTokens = options?.maxTokens ?? 4096;
+  const temperature = options?.temperature ?? 0.3;
   const maxRetries = 3;
   let lastError: Error | null = null;
 
@@ -362,10 +360,10 @@ export async function summarizeWithGroq(
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: GROQ_MODEL,
-        messages: [{ role: "user", content: prompt }],
-        max_tokens: 4096,
-        temperature: 0.3,
+        model,
+        messages,
+        max_tokens: maxTokens,
+        temperature,
       }),
     });
 
@@ -378,14 +376,21 @@ export async function summarizeWithGroq(
     }
 
     const errBody = await res.text();
-    const waitMs = res.status === 429 ? parseRetryAfterMs(errBody, 60 * 60 * 1000) : 0;
+    const isRateLimit = res.status === 429;
+    const isQuotaLimit = res.status === 412 || res.status === 413;
 
-    if (res.status === 429 && attempt < maxRetries - 1) {
+    if ((isRateLimit || isQuotaLimit) && attempt < maxRetries - 1) {
+      const waitMs = isRateLimit
+        ? parseRetryAfterMs(errBody, 60_000)
+        : 60_000;
       await sleep(waitMs);
       continue;
     }
 
-    if (res.status === 429) {
+    if (isRateLimit || isQuotaLimit) {
+      const waitMs = isRateLimit
+        ? parseRetryAfterMs(errBody, 60 * 60 * 1000)
+        : 60 * 60 * 1000;
       throw new GroqRateLimitError(`Groq API rate limit: ${res.status}. ${errBody}`, waitMs);
     }
 
@@ -394,6 +399,49 @@ export async function summarizeWithGroq(
   }
 
   throw lastError ?? new Error("Summarization failed.");
+}
+
+export async function summarizeWithGroq(
+  content: string,
+  apiKey: string,
+  options?: { isChunk?: boolean; isMerge?: boolean }
+): Promise<string> {
+  const systemPrompt = options?.isMerge
+    ? SUMMARIZE_MERGE_PROMPT
+    : options?.isChunk
+      ? SUMMARIZE_CHUNK_PROMPT
+      : SUMMARIZE_PROMPT;
+
+  const userLabel = options?.isMerge
+    ? "Rangkuman per bagian:\n\n"
+    : options?.isChunk
+      ? "Bagian:\n\n"
+      : "Dokumen:\n\n";
+
+  return callGroqApi(
+    [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userLabel + content },
+    ],
+    apiKey
+  );
+}
+
+export async function refineWithGroq(
+  currentSummary: string,
+  newChunk: string,
+  apiKey: string
+): Promise<string> {
+  return callGroqApi(
+    [
+      { role: "system", content: REFINE_SYSTEM_PROMPT },
+      {
+        role: "user",
+        content: `Rangkuman saat ini:\n\n${currentSummary}\n\n---\n\nBagian baru dari dokumen:\n\n${newChunk}`,
+      },
+    ],
+    apiKey
+  );
 }
 
 /**

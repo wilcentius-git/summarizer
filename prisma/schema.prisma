@@ -21,7 +21,7 @@ model SummaryJob {
   filename              String
   fileType              String    @map("file_type") // mp3 | pdf | docx
   uploadTime            DateTime  @default(now()) @map("upload_time")
-  status                String    @default("pending") // pending | processing | waiting_rate_limit | completed | failed
+  status                String    @default("pending") // pending | processing | waiting_rate_limit | completed | failed | cancelled
   summaryText           String?   @map("summary_text")
   progressPercentage    Int       @default(0) @map("progress_percentage")
   totalChunks           Int?      @map("total_chunks")
@@ -32,7 +32,6 @@ model SummaryJob {
   retryAfter            DateTime? @map("retry_after")
   extractedTextForRetry String?   @map("extracted_text_for_retry")
   jobRetryContext       String?   @map("job_retry_context") // JSON: { flow, leaderName?, leaderPosition? }
-  resumeToken           String?   @unique @map("resume_token") // Secret token for resume without login
   processedTranscribeChunks Int   @default(0) @map("processed_transcribe_chunks")
   partialTranscript     String?   @map("partial_transcript") // JSON array of transcript chunks
   audioPath             String?   @map("audio_path") // Path to stored audio for resume-from-transcription

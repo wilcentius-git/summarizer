@@ -144,7 +144,7 @@ Or connect your repo to [Vercel](https://vercel.com) for automatic deployments.
 
 ## Tech
 
-- Next.js 14 (App Router), React 18, TypeScript
+- Next.js 16 (App Router), React 18, TypeScript
 - **pdf-parse** for PDF text extraction; **pdf-to-img** for PDF-to-image when text is missing (scanned PDFs)
 - **mammoth** for DOCX/DOC text extraction; **rtf-parser** for RTF; **adm-zip** for ODT
 - **Groq API** for summaries (text), OCR/image understanding (Llama 4 Scout Vision), and **speech-to-text** (Whisper Large V3 Turbo)

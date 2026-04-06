@@ -5,6 +5,7 @@
  */
 
 import { chunkAudioBuffer } from "@/lib/audio-chunking";
+import { sleep } from "@/lib/groq";
 
 export const GROQ_TRANSCRIPTION_URL =
   "https://api.groq.com/openai/v1/audio/transcriptions";
@@ -74,10 +75,6 @@ const WHISPER_RETRY_DELAY_MS = 5000;
 const WHISPER_RATE_LIMIT_RETRY_ATTEMPTS = 5;
 /** Delay between transcription chunks to avoid bursting rate limits. */
 export const TRANSCRIBE_CHUNK_DELAY_MS = 3000;
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
-}
 
 /** Parse "Please try again in 58.5s" from Groq error body. Returns ms or null. */
 function parseRetryAfterMs(errBody: string, res?: Response): number | null {
@@ -212,8 +209,8 @@ export async function transcribeWithGroq(
     const result = await chunkAudioBuffer(buffer, fileName);
     chunks = result.chunks;
     cleanup = result.cleanup;
-  } catch {
-    // Fallback: ffmpeg unavailable or failed, send whole file
+  } catch (chunkErr) {
+    console.warn("Audio chunking failed, sending whole file:", chunkErr);
     chunks = [{ buffer }];
   }
 

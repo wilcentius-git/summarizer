@@ -99,7 +99,7 @@ export function renderPdfContent(
         nextY = opts.margin;
       }
       doc.text(wrapped[i], margin, nextY);
-      nextX = margin;
+      nextX = margin + doc.getTextDimensions(wrapped[i]).w;
     }
     y = nextY;
     return { nextX, nextY };

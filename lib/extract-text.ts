@@ -196,8 +196,8 @@ export async function extractText(
             options?.onProgress?.(`Mengekstrak teks dengan OCR (${images.length} halaman)…`);
             text = await options.ocrFallback(images);
           }
-        } catch {
-          // Keep original (possibly empty) text
+        } catch (ocrErr) {
+          console.error("OCR fallback failed:", ocrErr);
         }
       }
       break;

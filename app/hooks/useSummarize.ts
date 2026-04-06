@@ -1,0 +1,412 @@
+"use client";
+
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { FileItem } from "@/app/components/FileUpload";
+import type { SummaryJobItem } from "@/app/hooks/useHistory";
+
+const AUDIO_EXTENSIONS = [".mp3", ".mp4", ".mpeg", ".mpga", ".m4a", ".wav", ".webm", ".flac", ".ogg"];
+
+function isAudioFile(file: File): boolean {
+  if (["audio/mpeg", "audio/mp3", "audio/mp4", "audio/mpga", "audio/wav", "audio/webm", "audio/flac", "audio/ogg"].includes(file.type)) return true;
+  const ext = file.name.toLowerCase().slice(file.name.lastIndexOf("."));
+  return AUDIO_EXTENSIONS.includes(ext);
+}
+
+function sanitizeSummaryText(s: string): string {
+  if (!s) return s;
+  return s
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, "")
+    .replace(/\n{3,}/g, "\n\n");
+}
+
+function toUserFriendlyError(msg: string): string {
+  if (/41[23]/.test(msg)) return "You used up a per-minute quota.";
+  if (/429/.test(msg)) return "Wait for the rate limit window to reset (usually 1 hour).";
+  return msg;
+}
+
+function estimateSummarizeSeconds(fileSizeBytes: number): number {
+  return Math.max(30, Math.ceil(fileSizeBytes / 50000) * 45);
+}
+
+function estimateAudioTranscribeSeconds(durationSeconds: number | undefined, fileSizeBytes: number): number {
+  const TRANSCRIBE_CHUNK_STEP_SEC = 238;
+  const TRANSCRIBE_SEC_PER_CHUNK = 55;
+  const CHARS_PER_MIN_AUDIO = 900;
+  const SUMMARIZE_CHUNK_SIZE = 4500;
+  const SUMMARIZE_SEC_PER_CHUNK = 42;
+  const MERGE_OVERHEAD_SEC = 60;
+
+  let durationMin: number;
+  if (durationSeconds != null && durationSeconds > 0) {
+    durationMin = durationSeconds / 60;
+  } else {
+    const mb = fileSizeBytes / (1024 * 1024);
+    durationMin = Math.max(1, mb);
+  }
+
+  const durationSec = durationMin * 60;
+  const transChunks =
+    durationSec <= 300 && fileSizeBytes <= 8 * 1024 * 1024
+      ? 1
+      : Math.ceil(durationSec / TRANSCRIBE_CHUNK_STEP_SEC);
+  const transcriptChars = durationMin * CHARS_PER_MIN_AUDIO;
+  const sumChunks = Math.max(1, Math.ceil(transcriptChars / SUMMARIZE_CHUNK_SIZE));
+
+  const transTime = transChunks * TRANSCRIBE_SEC_PER_CHUNK;
+  const sumTime = sumChunks * SUMMARIZE_SEC_PER_CHUNK + MERGE_OVERHEAD_SEC;
+  return Math.max(60, Math.ceil(transTime + sumTime));
+}
+
+export type SummaryResult = {
+  fileId: string;
+  fileName: string;
+  text: string;
+  elapsedSeconds?: number;
+};
+
+export type SummarizeProgress = {
+  phase: string;
+  current: number;
+  total: number;
+  message?: string;
+  step?: number;
+  stepLabel?: string;
+};
+
+export function useSummarize(
+  groqApiKey: string,
+  fetchHistory: () => Promise<void>,
+  setError: (err: string | null) => void
+) {
+  const [summarizeLoading, setSummarizeLoading] = useState<string | null>(null);
+  const [summarizeProgress, setSummarizeProgress] = useState<SummarizeProgress | null>(null);
+  const [estimatedSeconds, setEstimatedSeconds] = useState<number | null>(null);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [summary, setSummary] = useState<SummaryResult | null>(null);
+  const [currentSummarizeJobId, setCurrentSummarizeJobId] = useState<string | null>(null);
+  const summarizeAbortRef = useRef<AbortController | null>(null);
+
+  const [resumeLoading, setResumeLoading] = useState<string | null>(null);
+  const [resumeProgress, setResumeProgress] = useState<{ message?: string } | null>(null);
+  const resumeAbortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    if (!summarizeLoading) {
+      setElapsedSeconds(0);
+      return;
+    }
+    const start = Date.now();
+    const interval = setInterval(() => {
+      setElapsedSeconds(Math.floor((Date.now() - start) / 1000));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [summarizeLoading]);
+
+  const pauseSummarize = useCallback(async () => {
+    summarizeAbortRef.current?.abort();
+    if (currentSummarizeJobId) {
+      try {
+        await fetch(`/api/summary-jobs/${currentSummarizeJobId}/cancel`, {
+          method: "POST",
+          credentials: "include",
+        });
+        fetchHistory();
+      } catch {
+        // Ignore
+      }
+    }
+    setCurrentSummarizeJobId(null);
+  }, [currentSummarizeJobId, fetchHistory]);
+
+  const abortSummarize = useCallback(async () => {
+    summarizeAbortRef.current?.abort();
+    if (currentSummarizeJobId) {
+      try {
+        await fetch(`/api/summary-jobs/${currentSummarizeJobId}/cancel`, {
+          method: "POST",
+          credentials: "include",
+        });
+        fetchHistory();
+      } catch {
+        // Ignore
+      }
+    }
+    setCurrentSummarizeJobId(null);
+  }, [currentSummarizeJobId, fetchHistory]);
+
+  const handleSummarize = useCallback(
+    async (item: FileItem) => {
+      const key = groqApiKey.trim();
+      if (!key) {
+        setError("Masukkan Groq API key terlebih dahulu. Dapatkan di console.groq.com");
+        return;
+      }
+      setError(null);
+      setCurrentSummarizeJobId(null);
+      setSummarizeLoading(item.id);
+      setSummarizeProgress({ phase: "extracting", current: 0, total: 1 });
+      setEstimatedSeconds(
+        isAudioFile(item.file)
+          ? estimateAudioTranscribeSeconds(item.durationSeconds, item.size)
+          : estimateSummarizeSeconds(item.size)
+      );
+
+      const controller = new AbortController();
+      summarizeAbortRef.current = controller;
+      const startTime = Date.now();
+
+      try {
+        const formData = new FormData();
+        formData.append("file", item.file);
+        formData.append("groqApiKey", key);
+        const res = await fetch("/api/summarize", {
+          method: "POST",
+          body: formData,
+          signal: controller.signal,
+        });
+
+        if (!res.ok || !res.body) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data.error || `Summarize failed: ${res.status}`);
+        }
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() ?? "";
+
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            try {
+              const data = JSON.parse(line) as {
+                type?: string;
+                jobId?: string;
+                phase?: string;
+                current?: number;
+                total?: number;
+                text?: string;
+                message?: string;
+                step?: number;
+                stepLabel?: string;
+              };
+              if (data.type === "job" && data.jobId) {
+                setCurrentSummarizeJobId(data.jobId);
+              } else if (data.type === "progress") {
+                setSummarizeProgress({
+                  phase: data.phase ?? "processing",
+                  current: data.current ?? 0,
+                  total: data.total ?? 1,
+                  message: data.message,
+                  step: data.step,
+                  stepLabel: data.stepLabel,
+                });
+              } else if (data.type === "summary") {
+                const elapsed = Math.floor((Date.now() - startTime) / 1000);
+                setSummary({
+                  fileId: item.id,
+                  fileName: item.name,
+                  text: sanitizeSummaryText(data.text ?? ""),
+                  elapsedSeconds: elapsed,
+                });
+                fetchHistory();
+              } else if (data.type === "waiting_rate_limit") {
+                fetchHistory();
+                setError(null);
+                setSummarizeLoading(null);
+                setSummarizeProgress(null);
+                return;
+              } else if (data.type === "error") {
+                throw new Error(data.message ?? "Summarization failed.");
+              }
+            } catch (parseErr) {
+              if (parseErr instanceof SyntaxError) continue;
+              throw parseErr;
+            }
+          }
+        }
+      } catch (err) {
+        if (err instanceof Error && err.name === "AbortError") {
+          setError("Dibatalkan.");
+        } else {
+          setError(toUserFriendlyError(err instanceof Error ? err.message : "Summarize failed."));
+        }
+      } finally {
+        setSummarizeLoading(null);
+        setSummarizeProgress(null);
+        setEstimatedSeconds(null);
+        setCurrentSummarizeJobId(null);
+        summarizeAbortRef.current = null;
+        fetchHistory();
+      }
+    },
+    [groqApiKey, fetchHistory, setError]
+  );
+
+  const pauseResume = useCallback(async () => {
+    resumeAbortRef.current?.abort();
+    const jobId = resumeLoading;
+    if (jobId) {
+      try {
+        await fetch(`/api/summary-jobs/${jobId}/cancel`, {
+          method: "POST",
+          credentials: "include",
+        });
+        fetchHistory();
+      } catch {
+        // Ignore
+      }
+    }
+  }, [resumeLoading, fetchHistory]);
+
+  const abortResume = useCallback(async () => {
+    resumeAbortRef.current?.abort();
+    const jobId = resumeLoading;
+    if (jobId) {
+      try {
+        await fetch(`/api/summary-jobs/${jobId}/cancel`, {
+          method: "POST",
+          credentials: "include",
+        });
+        fetchHistory();
+      } catch {
+        // Ignore
+      }
+    }
+  }, [resumeLoading, fetchHistory]);
+
+  const handleResumeJob = useCallback(
+    async (job: SummaryJobItem) => {
+      const key = groqApiKey.trim();
+      if (!key) {
+        setError("Masukkan Groq API key terlebih dahulu. Dapatkan di console.groq.com");
+        return;
+      }
+      if (!job.isResumable) return;
+      setError(null);
+      setResumeLoading(job.id);
+      setResumeProgress({ message: "Melanjutkan…" });
+
+      const controller = new AbortController();
+      resumeAbortRef.current = controller;
+      const startTime = Date.now();
+
+      try {
+        const res = await fetch(`/api/summary-jobs/${job.id}/resume`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ groqApiKey: key }),
+          signal: controller.signal,
+          credentials: "include",
+        });
+
+        if (!res.ok || !res.body) {
+          const text = await res.text();
+          let errMsg = `Resume failed: ${res.status}`;
+          try {
+            const data = JSON.parse(text);
+            if (data?.error) errMsg = data.error;
+          } catch {
+            if (text && text.length < 200) errMsg = text;
+          }
+          throw new Error(errMsg);
+        }
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() ?? "";
+
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            try {
+              const data = JSON.parse(line) as {
+                type?: string;
+                step?: number;
+                stepLabel?: string;
+                phase?: string;
+                current?: number;
+                total?: number;
+                message?: string;
+                text?: string;
+              };
+              if (data.type === "progress") {
+                const msg =
+                  data.message ??
+                  (data.phase === "chunks" && data.total != null
+                    ? `Bagian ${data.current ?? 0} dari ${data.total}`
+                    : data.phase === "merge"
+                      ? "Menggabungkan rangkuman…"
+                      : "Memproses…");
+                setResumeProgress({ message: msg });
+              } else if (data.type === "summary") {
+                const elapsed = Math.floor((Date.now() - startTime) / 1000);
+                setSummary({
+                  fileId: job.id,
+                  fileName: job.filename,
+                  text: sanitizeSummaryText(data.text ?? ""),
+                  elapsedSeconds: elapsed,
+                });
+                fetchHistory();
+              } else if (data.type === "waiting_rate_limit") {
+                fetchHistory();
+                setError(null);
+                setResumeLoading(null);
+                setResumeProgress(null);
+                return;
+              } else if (data.type === "error") {
+                throw new Error(data.message ?? "Resume failed.");
+              }
+            } catch (parseErr) {
+              if (parseErr instanceof SyntaxError) continue;
+              throw parseErr;
+            }
+          }
+        }
+      } catch (err) {
+        if (err instanceof Error && err.name === "AbortError") {
+          setError("Dibatalkan.");
+        } else {
+          setError(toUserFriendlyError(err instanceof Error ? err.message : "Resume failed."));
+        }
+      } finally {
+        setResumeLoading(null);
+        setResumeProgress(null);
+        resumeAbortRef.current = null;
+        fetchHistory();
+      }
+    },
+    [groqApiKey, fetchHistory, setError]
+  );
+
+  return {
+    summarizeLoading,
+    summarizeProgress,
+    estimatedSeconds,
+    elapsedSeconds,
+    summary,
+    setSummary,
+    resumeLoading,
+    resumeProgress,
+    handleSummarize,
+    pauseSummarize,
+    abortSummarize,
+    handleResumeJob,
+    pauseResume,
+    abortResume,
+  };
+}

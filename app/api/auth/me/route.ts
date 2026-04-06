@@ -35,6 +35,6 @@ export async function GET() {
     });
   } catch (err) {
     console.error("Me error:", err);
-    return NextResponse.json({ user: null }, { status: 200 });
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }

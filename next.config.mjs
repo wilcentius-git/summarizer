@@ -1,15 +1,15 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: "standalone",
+  serverExternalPackages: [
+    "@napi-rs/canvas",
+    "pdfjs-dist",
+    "@ffprobe-installer/ffprobe",
+    "ffmpeg-static",
+    "fluent-ffmpeg",
+  ],
   experimental: {
-    middlewareClientMaxBodySize: "25mb",
-    serverComponentsExternalPackages: [
-      "@napi-rs/canvas",
-      "pdfjs-dist",
-      "@ffprobe-installer/ffprobe",
-      "ffmpeg-static",
-      "fluent-ffmpeg",
-    ],
+    proxyClientMaxBodySize: "25mb",
   },
 };
 

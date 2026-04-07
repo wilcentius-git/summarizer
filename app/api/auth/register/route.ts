@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { setAuthTokenCookie } from "@/lib/auth-cookie";
 import { hashPassword, createToken } from "@/lib/auth";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { registerSchema } from "@/lib/validations";
@@ -42,13 +43,7 @@ export async function POST(request: Request) {
     const response = NextResponse.json({
       user: { id: user.id, email: user.email, createdAt: user.createdAt },
     });
-    response.cookies.set("auth-token", token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      maxAge: 60 * 60 * 24 * 7, // 7 days
-      path: "/",
-    });
+    setAuthTokenCookie(response, token);
     return response;
   } catch (err) {
     console.error("Register error:", err);

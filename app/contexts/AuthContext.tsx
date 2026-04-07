@@ -31,6 +31,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const refresh = useCallback(async () => {
     try {
       const res = await fetch("/api/auth/me", { credentials: "include" });
+      if (res.status === 401) {
+        setUser(null);
+        const path =
+          typeof window !== "undefined" ? window.location.pathname : "";
+        if (path !== "/login" && path !== "/register") {
+          window.location.href = "/login";
+        }
+        return;
+      }
       const data = await res.json();
       setUser(data.user ?? null);
     } catch {

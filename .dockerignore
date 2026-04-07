@@ -1,13 +1,22 @@
 # dependencies
 node_modules
+**/node_modules
 .pnp
 .pnp.js
 .yarn/install-state.gz
 
 # build output
 .next
+**/.next
 out
 build
+
+# local Python / ML (not used in Next.js image; was ~GB+ of CUDA libs)
+summarizer_venv
+venv
+.venv
+**/__pycache__
+*.pyc
 
 # misc
 .DS_Store

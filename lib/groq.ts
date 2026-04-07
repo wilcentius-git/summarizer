@@ -204,29 +204,36 @@ PENTING: Ringkasan Eksekutif dan Insight tambahan MAKSIMAL 40 kata masing-masing
 
 **Ringkasan Eksekutif:**
 
-[40 kata atau kurang: topik utama, poin kunci, kesimpulan utama]
+[40 kata atau kurang: gambaran UMUM—topik utama dan kesimpulan inti. JANGAN menyalin kalimat dari Rangkuman. Bagian ini adalah ikhtisar tingkat tinggi, bukan ringkasan poin-poin.]
 
 **Rangkuman:**
 
-1. [Poin penting pertama]
-2. [Poin penting kedua]
-3. [Poin penting ketiga]
+1. [Poin spesifik pertama—sertakan detail konkret: nama, angka, contoh, atau kutipan singkat dari sumber]
+2. [Poin spesifik kedua]
+3. [Poin spesifik ketiga]
 ... (lanjutkan dengan nomor berurutan, maksimal 5–6 poin utama. Sub-poin: gunakan a., b., c. jika perlu)
 
 **Insight tambahan:**
 
-[40 kata atau kurang: 2–3 insight singkat yang actionable]
+[40 kata atau kurang: 2–3 insight NON-OBVIOUS yang berasal dari narasumber/penulis—bukan nasihat umum. Tulis apa yang disampaikan narasumber, bukan saran generik. Contoh BURUK: "hidup lebih bahagia jika tidak berekspektasi". Contoh BAIK: "Ferry menekankan bahwa pertimbangan ekonomi lebih objektif daripada emosi saat menghadapi konflik kepentingan".]
+
+PERAN TIAP BAGIAN (WAJIB DIPATUHI):
+- **Ringkasan Eksekutif** = ikhtisar tingkat tinggi. TIDAK BOLEH mengulang kalimat yang sama dari Rangkuman.
+- **Rangkuman** = poin-poin detail dengan fakta spesifik (nama, angka, contoh nyata). Hindari pernyataan generik yang bisa berlaku untuk topik apa saja.
+- **Insight tambahan** = takeaway non-obvious DARI narasumber/penulis. Bukan nasihat hidup umum.
 
 - Output HANYA 3 bagian. Beri baris kosong antara judul dan isi.
 - JANGAN gunakan format notula (Metadata, Peserta Rapat, Acara, dll.) untuk dokumen ini.
 - Variasikan frasa: jangan ulangi "penulis berpendapat" berkali-kali; gunakan "menurut penulis", "penulis menyatakan", "penulis mengemukakan", dll.
 - KONSOLIDASI: Gabungkan poin yang mirip menjadi satu. Jangan ulangi ide yang sama.
 - Gunakan **bold** untuk istilah penting, nama, organisasi.
+- SPESIFISITAS: Setiap poin harus mengandung detail konkret dari sumber (siapa berkata apa, angka, contoh). Hindari kalimat generik seperti "beradaptasi dengan perubahan dapat menjadi tantangan" yang bisa berlaku untuk konteks apa saja.
 
 ATURAN UMUM:
 - DEDUPLIKASI: Poin yang sama atau mirip hanya perlu disebut SATU KALI. Hindari pengulangan ide.
+- CROSS-SECTION DEDUP: Ringkasan Eksekutif, Rangkuman, dan Insight tambahan TIDAK BOLEH mengandung kalimat atau ide yang sama. Setiap bagian punya peran berbeda.
 - Hindari kata "juga" di awal atau akhir kalimat. Variasikan struktur kalimat.
-- Perbaiki typo umum (mis. "menafigasi" → "menavigasi").
+- KOREKSI TRANSKRIPSI: Perbaiki kesalahan umum dari speech-to-text, mis. "ekspetasi" → "ekspektasi", "menafigasi" → "menavigasi", "infestasi" → "investasi", "ekosistem" yang seharusnya "eksistem", nama orang/tempat yang salah eja.
 - Gunakan konten dari SEMUA halaman dokumen. Jangan hanya merangkum halaman terakhir.
 - Tanpa pembukaan lain, langsung rangkuman saja.
 - Pastikan rangkuman selesai lengkap; jangan potong di tengah kalimat.`;
@@ -234,9 +241,10 @@ ATURAN UMUM:
 const SUMMARIZE_CHUNK_PROMPT = `Rangkum bagian berikut secara ringkas dalam Bahasa Indonesia.
 - Fokus pada poin-poin penting dan UNIK. Poin yang sama hanya disebut SATU KALI. Gabungkan ide mirip; jangan ulangi di paragraf berbeda.
 - Jika bagian ini dari notula/pertemuan (ada peserta, jalannya rapat, diskusi): PERTAHANKAN nama orang, organisasi/unit, detail teknis. Gunakan format: daftar bernomor (1., 2.) dan sub-list huruf (a., b., c.). Bold (**) untuk nama orang, organisasi, istilah teknis.
-- Jika bagian ini dari buku/artikel/podcast: format 3 bagian—**Ringkasan Eksekutif** (MAKSIMAL 40 kata), **Rangkuman** (daftar bernomor), **Insight tambahan** (MAKSIMAL 40 kata). Beri baris kosong antara judul dan isi.
+- Jika bagian ini dari buku/artikel/podcast: format 3 bagian—**Ringkasan Eksekutif** (MAKSIMAL 40 kata, ikhtisar tingkat tinggi), **Rangkuman** (daftar bernomor dengan detail konkret: nama, angka, contoh), **Insight tambahan** (MAKSIMAL 40 kata, takeaway non-obvious DARI narasumber/penulis—bukan nasihat umum). Beri baris kosong antara judul dan isi. Ringkasan Eksekutif TIDAK BOLEH mengulang kalimat dari Rangkuman.
+- SPESIFISITAS: Sertakan detail konkret (siapa, apa, contoh nyata). Hindari pernyataan generik yang berlaku untuk topik apa saja.
 - Hindari kata "juga" di awal atau akhir kalimat. Variasikan struktur kalimat.
-- Perbaiki typo umum (mis. "menafigasi" → "menavigasi").
+- KOREKSI TRANSKRIPSI: Perbaiki kesalahan umum dari speech-to-text, mis. "ekspetasi" → "ekspektasi", "menafigasi" → "menavigasi", "infestasi" → "investasi".
 - Tanpa pembukaan, langsung rangkuman saja. Pastikan kalimat terakhir selesai lengkap.`;
 
 const SUMMARIZE_MERGE_PROMPT = `PENTING: Ringkasan Eksekutif dan Insight tambahan MAKSIMAL 40 kata masing-masing. JANGAN lebih.
@@ -244,18 +252,20 @@ const SUMMARIZE_MERGE_PROMPT = `PENTING: Ringkasan Eksekutif dan Insight tambaha
 Input di bawah terdiri dari BEBERAPA rangkuman per bagian. Gabungkan menjadi SATU rangkuman final.
 
 Output HANYA:
-- SATU **Ringkasan Eksekutif** (pilih HANYA poin paling penting, MAKSIMAL 40 kata)
-- SATU **Rangkuman** (daftar bernomor 1., 2., 3., ... gabungkan semua poin)
-- SATU **Insight tambahan** (pilih HANYA insight terbaik, MAKSIMAL 40 kata total)
+- SATU **Ringkasan Eksekutif** (ikhtisar tingkat tinggi, MAKSIMAL 40 kata. JANGAN menyalin kalimat dari Rangkuman—tulis gambaran umum saja.)
+- SATU **Rangkuman** (daftar bernomor 1., 2., 3., ... gabungkan semua poin. Setiap poin harus mengandung detail konkret: nama, angka, contoh nyata. Buang poin yang terlalu generik.)
+- SATU **Insight tambahan** (MAKSIMAL 40 kata total. Takeaway non-obvious DARI narasumber/penulis—BUKAN nasihat hidup umum. Tulis apa yang disampaikan narasumber, bukan saran generik seperti "hidup lebih bahagia".)
 
 Beri baris kosong antara judul section dan isi. Buang informasi kurang penting—prioritaskan yang esensial saja.
 
 ATURAN:
 - DEDUPLIKASI: Poin yang sama atau mirip hanya perlu disebut SATU KALI. Gabungkan ide mirip menjadi satu; jangan ulangi di paragraf berbeda.
+- CROSS-SECTION DEDUP: Ringkasan Eksekutif, Rangkuman, dan Insight tambahan TIDAK BOLEH mengandung kalimat atau ide yang sama. Setiap bagian punya peran berbeda.
+- SPESIFISITAS: Buang poin generik yang berlaku untuk konteks apa saja (mis. "beradaptasi itu tantangan"). Pertahankan hanya poin yang mengandung detail spesifik dari sumber.
 - Format RAPAT/NOTULA hanya jika rangkuman per bagian JELAS berisi rapat/pertemuan (peserta, jalannya rapat, diskusi). Gabungkan ke format terstruktur dengan MARKDOWN: **bold** untuk heading dan istilah penting, daftar bernomor (1., 2.) dan sub-list huruf (a., b., c.). Pertahankan nama orang dan detail teknis. Untuk **Kesimpulan**: boleh tambahkan insight Anda sendiri (analisis, rekomendasi, observasi) yang relevan.
 - Jika rangkuman berisi buku/artikel/podcast: Output 3 bagian—**Ringkasan Eksekutif**, **Rangkuman**, **Insight tambahan**. Ringkasan Eksekutif dan Insight tambahan MAKSIMAL 40 kata. Pilih poin paling penting saja; buang sisanya.
 - Hindari kata "juga" di awal atau akhir kalimat. Variasikan kata penghubung dan frasa (selain itu, selanjutnya, menurut penulis, dll.) - jangan gunakan "penulis berpendapat" berulang kali.
-- Perbaiki typo umum (mis. "menafigasi" → "menavigasi").
+- KOREKSI TRANSKRIPSI: Perbaiki kesalahan umum dari speech-to-text, mis. "ekspetasi" → "ekspektasi", "menafigasi" → "menavigasi", "infestasi" → "investasi".
 - Pastikan rangkuman selesai LENGKAP; jangan potong di tengah kalimat atau paragraf.
 - Tanpa pembukaan lain, langsung rangkuman saja. Output akhir: tepat satu blok **Ringkasan Eksekutif**, satu blok **Rangkuman**, satu blok **Insight tambahan**. Tidak boleh ada pengulangan struktur ini.`;
 
@@ -333,11 +343,13 @@ Aturan:
 - Pertahankan format dan struktur rangkuman saat ini (notula/rapat ATAU dokumen umum—jangan ubah jenis format).
 - Integrasikan informasi baru ke dalam rangkuman yang sudah ada secara alami.
 - DEDUPLIKASI: Poin yang sama atau mirip hanya disebut SATU KALI. Gabungkan ide mirip.
+- CROSS-SECTION DEDUP: Ringkasan Eksekutif, Rangkuman, dan Insight tambahan TIDAK BOLEH mengandung kalimat atau ide yang sama.
+- SPESIFISITAS: Setiap poin harus mengandung detail konkret dari sumber (nama, angka, contoh). Hindari pernyataan generik.
 - Tulis dalam Bahasa Indonesia. Istilah teknis tetap gunakan istilah aslinya.
 - Gunakan **bold** untuk nama orang, organisasi, istilah teknis.
-- Untuk format dokumen umum: **Ringkasan Eksekutif** dan **Insight tambahan** MAKSIMAL 40 kata masing-masing.
+- Untuk format dokumen umum: **Ringkasan Eksekutif** (ikhtisar tingkat tinggi, MAKSIMAL 40 kata) dan **Insight tambahan** (takeaway non-obvious DARI narasumber/penulis—bukan nasihat umum, MAKSIMAL 40 kata).
 - Hindari kata "juga" di awal atau akhir kalimat. Variasikan struktur kalimat.
-- Perbaiki typo umum (mis. "menafigasi" → "menavigasi").
+- KOREKSI TRANSKRIPSI: Perbaiki kesalahan umum dari speech-to-text, mis. "ekspetasi" → "ekspektasi", "menafigasi" → "menavigasi", "infestasi" → "investasi".
 - Pastikan rangkuman selesai lengkap; jangan potong di tengah kalimat.
 - Tanpa pembukaan, langsung rangkuman saja.`;
 

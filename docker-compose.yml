@@ -3,7 +3,16 @@ services:
     build: .
     ports:
       - "3000:3000"
-    # Optional: uncomment to load GROQ_API_KEY from .env.local
-    # env_file:
-    #   - .env.local
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      NODE_ENV: production
+      # Writable SQLite path inside the container (override host .env if needed)
+      DATABASE_URL: file:/app/data/prod.db
+    volumes:
+      - summarizer-data:/app/data
     restart: unless-stopped
+
+volumes:
+  summarizer-data:

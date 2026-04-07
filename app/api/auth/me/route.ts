@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { prisma } from "@/lib/prisma";
+import { clearAuthTokenCookie } from "@/lib/auth-cookie";
 import { verifyToken } from "@/lib/auth";
 
 export async function GET() {
@@ -14,7 +15,9 @@ export async function GET() {
 
     const payload = await verifyToken(token);
     if (!payload) {
-      return NextResponse.json({ user: null }, { status: 200 });
+      const res = NextResponse.json({ user: null }, { status: 401 });
+      clearAuthTokenCookie(res);
+      return res;
     }
 
     const user = await prisma.user.findUnique({
@@ -23,7 +26,9 @@ export async function GET() {
     });
 
     if (!user) {
-      return NextResponse.json({ user: null }, { status: 200 });
+      const res = NextResponse.json({ user: null }, { status: 401 });
+      clearAuthTokenCookie(res);
+      return res;
     }
 
     return NextResponse.json({

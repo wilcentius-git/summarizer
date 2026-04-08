@@ -1,5 +1,6 @@
-# Creates an annotated git tag vX.Y.Z from package.json when the version changes on main.
-# Pushing the tag triggers release.yml, which publishes a GitHub Release.
+# Creates an annotated git tag vX.Y.Z from package.json when the version changes on main,
+# then publishes a GitHub Release for that tag in the same workflow.
+# (Pushes using GITHUB_TOKEN do not trigger other workflows, so release.yml does not run for these tags.)
 name: Tag version
 
 on:
@@ -7,6 +8,7 @@ on:
     branches: [main]
     paths:
       - package.json
+      - ".github/workflows/tag-version.yml"
   workflow_dispatch:
     inputs:
       version:
@@ -53,3 +55,11 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git tag -a "${TAG}" -m "Release ${TAG}"
           git push origin "${TAG}"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.ver.outputs.tag }}
+          name: ${{ steps.ver.outputs.tag }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

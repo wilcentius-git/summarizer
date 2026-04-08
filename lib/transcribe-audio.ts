@@ -95,7 +95,7 @@ function parseRetryAfterMs(errBody: string, res?: Response): number | null {
 async function transcribeSingleChunk(
   buffer: Buffer,
   apiKey: string,
-  options: { language?: string; fileName: string }
+  options: { language?: string; fileName: string; prompt?: string }
 ): Promise<string> {
   const fileName = options.fileName;
   const mime =
@@ -113,6 +113,9 @@ async function transcribeSingleChunk(
   formData.append("response_format", "text");
   if (options.language) {
     formData.append("language", options.language);
+  }
+  if (options.prompt) {
+    formData.append("prompt", options.prompt);
   }
 
   let lastError: Error | null = null;
@@ -174,6 +177,8 @@ export class TranscribeCancelledError extends Error {
 export interface TranscribeOptions {
   language?: string;
   fileName?: string;
+  /** Optional vocabulary/context hint passed to Whisper to improve technical term recognition. */
+  prompt?: string;
   /** Called when chunk N of total is being transcribed (for progress UI). */
   onChunkProgress?: (current: number, total: number) => void;
   /** Called after each chunk is transcribed (for saving partial progress). */
@@ -229,6 +234,7 @@ export async function transcribeWithGroq(
       const text = await transcribeSingleChunk(chunk.buffer, apiKey, {
         language: options?.language,
         fileName: chunkFileName,
+        prompt: options?.prompt,
       });
       if (text.trim()) {
         transcripts.push(text.trim());

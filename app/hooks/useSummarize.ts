@@ -138,7 +138,7 @@ export function useSummarize(
   }, [currentSummarizeJobId, fetchHistory]);
 
   const handleSummarize = useCallback(
-    async (item: FileItem) => {
+    async (item: FileItem, glossary?: string) => {
       const key = groqApiKey.trim();
       if (!key) {
         setError("Masukkan Groq API key terlebih dahulu. Dapatkan di console.groq.com");
@@ -162,6 +162,9 @@ export function useSummarize(
         const formData = new FormData();
         formData.append("file", item.file);
         formData.append("groqApiKey", key);
+        if (glossary?.trim()) {
+          formData.append("glossary", glossary.trim());
+        }
         const res = await fetch("/api/summarize", {
           method: "POST",
           body: formData,

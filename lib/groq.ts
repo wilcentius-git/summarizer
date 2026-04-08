@@ -278,22 +278,33 @@ export type MergeProgress = (current: number, total: number) => void;
 export async function mergeSummaries(
   summaries: string[],
   apiKey: string,
-  onProgress?: MergeProgress
+  optionsOrProgress?: MergeProgress | { glossary?: string; onProgress?: MergeProgress },
+  legacyOnProgress?: MergeProgress
 ): Promise<string> {
+  let glossary: string | undefined;
+  let onProgress: MergeProgress | undefined;
+  if (typeof optionsOrProgress === "function") {
+    onProgress = optionsOrProgress;
+  } else if (optionsOrProgress) {
+    glossary = optionsOrProgress.glossary;
+    onProgress = optionsOrProgress.onProgress;
+  }
+  if (legacyOnProgress) onProgress = legacyOnProgress;
+
   const combined = summaries.join("\n\n");
   if (combined.length <= SUMMARIZE_MERGE_THRESHOLD) {
-    return summarizeWithGroq(combined, apiKey, { isMerge: true });
+    return summarizeWithGroq(combined, apiKey, { isMerge: true, glossary });
   }
   const chunks = splitIntoChunks(combined, SUMMARIZE_CHUNK_SIZE);
   const merged: string[] = [];
   for (let i = 0; i < chunks.length; i++) {
-    merged.push(await summarizeWithGroq(chunks[i], apiKey, { isMerge: true }));
+    merged.push(await summarizeWithGroq(chunks[i], apiKey, { isMerge: true, glossary }));
     onProgress?.(i + 1, chunks.length);
     if (i < chunks.length - 1) {
       await sleep(SUMMARIZE_CHUNK_DELAY_MS);
     }
   }
-  return mergeSummaries(merged, apiKey, onProgress);
+  return mergeSummaries(merged, apiKey, { glossary, onProgress });
 }
 
 /** Error thrown when Groq returns 429 after all retries. Job should be set to waiting_rate_limit. */
@@ -416,13 +427,19 @@ async function callGroqApi(
 export async function summarizeWithGroq(
   content: string,
   apiKey: string,
-  options?: { isChunk?: boolean; isMerge?: boolean }
+  options?: { isChunk?: boolean; isMerge?: boolean; glossary?: string }
 ): Promise<string> {
-  const systemPrompt = options?.isMerge
+  const basePrompt = options?.isMerge
     ? SUMMARIZE_MERGE_PROMPT
     : options?.isChunk
       ? SUMMARIZE_CHUNK_PROMPT
       : SUMMARIZE_PROMPT;
+
+  const glossaryNote = options?.glossary
+    ? `\n\nISTILAH TEKNIS KHUSUS (pertahankan ejaan persis seperti ini, jangan ubah atau terjemahkan): ${options.glossary}`
+    : "";
+
+  const systemPrompt = basePrompt + glossaryNote;
 
   const userLabel = options?.isMerge
     ? "Rangkuman per bagian:\n\n"

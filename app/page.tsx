@@ -39,6 +39,8 @@ export default function Home() {
   const { files, dragActive, addFiles, removeFile, handleDrag, handleDrop, ACCEPTED_FILE_TYPES } =
     useFileUpload(setError);
 
+  const [glossaryMap, setGlossaryMap] = useState<Record<string, string>>({});
+
   const resumeCardRef = useRef<HTMLDivElement | null>(null);
 
   const onResumeJob = useCallback(
@@ -203,6 +205,21 @@ export default function Home() {
                       <p className="text-sm text-gray-500">{formatSize(item.size)}</p>
                     </div>
                   </div>
+                  <div className="text-left">
+                    <label className="text-xs text-gray-500 mb-1 block">
+                      Istilah teknis <span className="text-gray-400">(opsional)</span>
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Contoh: PSSI, KPI, DevSecOps, CI/CD, XSS"
+                      value={glossaryMap[item.id] ?? ""}
+                      onChange={(e) =>
+                        setGlossaryMap((prev) => ({ ...prev, [item.id]: e.target.value }))
+                      }
+                      disabled={summarizeLoading === item.id}
+                      className="w-full rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-900 placeholder-gray-400 focus:border-kemenkum-blue focus:outline-none focus:ring-1 focus:ring-kemenkum-blue disabled:opacity-60"
+                    />
+                  </div>
                   {summarizeLoading === item.id && summarizeProgress && (
                     <div className="w-full min-w-0">
                       <ProgressDisplay
@@ -216,7 +233,7 @@ export default function Home() {
                   <div className="flex flex-wrap items-center gap-2 justify-end min-w-0">
                     <button
                       type="button"
-                      onClick={() => handleSummarize(item)}
+                      onClick={() => handleSummarize(item, glossaryMap[item.id] ?? "")}
                       disabled={!!summarizeLoading}
                       className="px-4 py-2 rounded-lg bg-kemenkum-blue text-white text-sm font-medium hover:opacity-90 disabled:opacity-60 whitespace-nowrap"
                     >
@@ -244,6 +261,11 @@ export default function Home() {
                       type="button"
                       onClick={() => {
                         removeFile(item.id);
+                        setGlossaryMap((prev) => {
+                          const next = { ...prev };
+                          delete next[item.id];
+                          return next;
+                        });
                         if (summary?.fileId === item.id) setSummary(null);
                       }}
                       className="p-2 rounded-lg border border-gray-300 text-gray-600 hover:border-red-400 hover:text-red-600 hover:bg-red-50 flex-shrink-0"

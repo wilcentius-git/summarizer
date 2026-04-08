@@ -62,6 +62,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid form data." }, { status: 400 });
   }
   const apiKey = (formData.get("groqApiKey") as string)?.trim();
+  const glossary = ((formData.get("glossary") as string | null) ?? "").trim();
   const file = formData.get("file");
 
   if (!apiKey) {
@@ -193,6 +194,7 @@ export async function POST(request: NextRequest) {
             text = await transcribeWithGroq(buffer, apiKey, {
               language: "id",
               fileName,
+              prompt: glossary || undefined,
               isCancelled: () => isJobCancelled(job.id),
               onChunkProgress: (current, total) => {
                 send({
@@ -280,7 +282,7 @@ export async function POST(request: NextRequest) {
               step: isAudio ? 2 : 1,
               stepLabel: "Rangkuman",
             });
-            summary = await summarizeWithGroq(text, apiKey);
+            summary = await summarizeWithGroq(text, apiKey, { glossary: glossary || undefined });
           } else {
             await updateJob({ progressPercentage: 60 });
             const chunks = splitIntoChunks(text, SUMMARIZE_CHUNK_SIZE);
@@ -304,6 +306,7 @@ export async function POST(request: NextRequest) {
               }
               const part = await summarizeWithGroq(chunks[i], apiKey, {
                 isChunk: true,
+                glossary: glossary || undefined,
               });
               chunkSummaries.push(part);
               await updateJob({
@@ -338,7 +341,7 @@ export async function POST(request: NextRequest) {
               stepLabel: "Gabung",
             });
             await sleep(SUMMARIZE_MERGE_PRE_DELAY_MS);
-            summary = await mergeSummaries(chunkSummaries, apiKey, (cur, tot) => {
+            summary = await mergeSummaries(chunkSummaries, apiKey, { glossary: glossary || undefined }, (cur, tot) => {
               send({
                 type: "progress",
                 phase: "merge",

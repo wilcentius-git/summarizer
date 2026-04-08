@@ -6,6 +6,7 @@ A simple web app to upload documents and get AI-generated summaries.
 
 - **Upload documents** – Add files via file picker or drag and drop (max 500 MB per file). Supports: **PDF**, **DOCX**, **DOC**, **TXT**, **RTF**, **ODT**, **SRT**, **MP3**, **WAV**, **M4A**, **WebM**, **FLAC**, **OGG**.
 - **Summarize** – Extract text and get a concise summary via Groq (Llama). Supports scanned PDFs via OCR (Groq Vision) and **audio transcription** via Groq Whisper (MP3, WAV, etc., max 25 MB for free tier).
+- **Optional technical terms** – After you add a file to the queue, you can fill **Istilah teknis (opsional)** with abbreviations or jargon (e.g. `PSSI, KPI, XSS, CI/CD`). They are sent to Whisper as a transcription **prompt** (helps spelling of rare terms) and to the summarizer so it keeps those spellings and interprets the domain better.
 - **Segmented Summarize** – Works on text with **label and opinion format** (e.g., speaker-labeled transcripts, structured opinions). The model checks the format first; if not found, returns "no segmented opinion format". For **audio (MP3, etc.)**: optionally use **pyannote.audio** (via WhisperX) for speaker diarization when a Hugging Face token is provided.
 
 ## Setup
@@ -23,6 +24,8 @@ A simple web app to upload documents and get AI-generated summaries.
    ```
 
 3. Open [http://localhost:3000](http://localhost:3000) and enter your Groq API key in the form (get a free key at [console.groq.com](https://console.groq.com)). The key is cached for 1 hour in your browser.
+
+4. (Optional) After uploading a file, use **Istilah teknis** on that row before clicking **Summarize** if the content uses domain-specific vocabulary.
 
 ### Segmented Summarize with speaker diarization (optional)
 
@@ -107,7 +110,11 @@ docker build -t summarizer .
 **Run (foreground – use Ctrl+C to stop):**
 
 ```bash
-docker run -p 3000:3000 summarizer
+   docker run -p 3000:3000 summarizer
+```
+
+```bash
+docker run --rm -p 3000:3000 -v summarizer-db:/app/data -e DATABASE_URL="file:/app/data/prod.db" -e JWT_SECRET="change-this-to-a-secure-random-string-in-production" -e NODE_ENV=development summarizer
 ```
 
 **Run (background):**
@@ -160,21 +167,23 @@ Or connect your repo to [Vercel](https://vercel.com) for automatic deployments.
    - **ODT**: adm-zip + XML parsing
    - **SRT**: Custom parser (timestamps + speaker turns)
    - **PDF**: pdf-parse first; if text is empty or very short (< 50 chars), falls back to OCR
-   - **Audio (MP3, WAV, M4A, etc.)**: Groq Whisper (`whisper-large-v3-turbo`) transcribes to text, then summarization proceeds as usual
+   - **Audio (MP3, WAV, M4A, etc.)**: Groq Whisper (`whisper-large-v3-turbo`) transcribes to text. If the user provided optional **Istilah teknis**, that string is passed as the Whisper API `prompt` on each audio chunk, then summarization proceeds as usual.
 
-2. **PDF OCR fallback** – For scanned PDFs:
+2. **Glossary for summarization** – When **Istilah teknis** is set, the same string is appended to the summarizer system prompt so technical spellings are preserved and the model has domain context (applies to documents and audio alike).
+
+3. **PDF OCR fallback** – For scanned PDFs:
    - `pdf-to-img` converts pages to PNG images (scale 3, max 20 pages)
    - Each page is sent to Groq Vision API (`meta-llama/llama-4-scout-17b-16e-instruct`)
    - Extracted text is concatenated with `[Halaman N]` markers
 
-3. **Chunking** – If text exceeds ~8,000 chars (~2,000 tokens):
+4. **Chunking** – If text exceeds ~8,000 chars (~2,000 tokens):
    - Split at natural boundaries (paragraph, line, sentence)
    - Each chunk summarized separately with `llama-3.1-8b-instant`
    - 2.5 s delay between chunk requests to avoid rate limits
 
-4. **Merge** – Chunk summaries are merged recursively until a single summary remains. Retries on 429 (rate limit) up to 3 times.
+5. **Merge** – Chunk summaries are merged recursively until a single summary remains. Retries on 429 (rate limit) up to 3 times.
 
-5. **Response** – Streamed as NDJSON: `progress` events, then `summary` or `error`.
+6. **Response** – Streamed as NDJSON: `progress` events, then `summary` or `error`.
 
 ### Segmented Summarize Flow
 

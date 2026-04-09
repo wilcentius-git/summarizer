@@ -208,10 +208,9 @@ PENTING: Ringkasan Eksekutif dan Insight tambahan MAKSIMAL 40 kata masing-masing
 
 **Rangkuman:**
 
-1. [Poin spesifik pertama—sertakan detail konkret: nama, angka, contoh, atau kutipan singkat dari sumber]
-2. [Poin spesifik kedua]
-3. [Poin spesifik ketiga]
-... (lanjutkan dengan nomor berurutan, maksimal 5–6 poin utama. Sub-poin: gunakan a., b., c. jika perlu)
+1. [Heading poin pertama.] [Detail, contoh, atau fakta spesifik sebagai kalimat lanjutan dalam paragraf yang sama.]
+2. [Heading poin kedua.] [Detail lanjutan.]
+... (lanjutkan dengan nomor berurutan. Sertakan semua poin yang penting dan spesifik. Buang poin yang generik, redundan, atau tidak memberikan informasi baru. Tidak ada batas jumlah, tapi jangan tambahkan poin yang tidak bernilai. JANGAN gunakan sub-poin a., b., c.—gabungkan semua detail sebagai kalimat lanjutan dalam paragraf bernomor yang sama.)
 
 **Insight tambahan:**
 
@@ -241,7 +240,7 @@ ATURAN UMUM:
 const SUMMARIZE_CHUNK_PROMPT = `Rangkum bagian berikut secara ringkas dalam Bahasa Indonesia.
 - Fokus pada poin-poin penting dan UNIK. Poin yang sama hanya disebut SATU KALI. Gabungkan ide mirip; jangan ulangi di paragraf berbeda.
 - Jika bagian ini dari notula/pertemuan (ada peserta, jalannya rapat, diskusi): PERTAHANKAN nama orang, organisasi/unit, detail teknis. Gunakan format: daftar bernomor (1., 2.) dan sub-list huruf (a., b., c.). Bold (**) untuk nama orang, organisasi, istilah teknis.
-- Jika bagian ini dari buku/artikel/podcast: format 3 bagian—**Ringkasan Eksekutif** (MAKSIMAL 40 kata, ikhtisar tingkat tinggi), **Rangkuman** (daftar bernomor dengan detail konkret: nama, angka, contoh), **Insight tambahan** (MAKSIMAL 40 kata, takeaway non-obvious DARI narasumber/penulis—bukan nasihat umum). Beri baris kosong antara judul dan isi. Ringkasan Eksekutif TIDAK BOLEH mengulang kalimat dari Rangkuman.
+- Jika bagian ini dari buku/artikel/podcast: format 3 bagian—**Ringkasan Eksekutif** (MAKSIMAL 40 kata, ikhtisar tingkat tinggi), **Rangkuman** (daftar bernomor dengan detail konkret: nama, angka, contoh. JANGAN gunakan sub-poin—tulis detail sebagai kalimat lanjutan dalam paragraf bernomor yang sama. Sertakan semua poin penting; buang yang generik atau redundan.), **Insight tambahan** (MAKSIMAL 40 kata, takeaway non-obvious DARI narasumber/penulis—bukan nasihat umum). Beri baris kosong antara judul dan isi. Ringkasan Eksekutif TIDAK BOLEH mengulang kalimat dari Rangkuman.
 - SPESIFISITAS: Sertakan detail konkret (siapa, apa, contoh nyata). Hindari pernyataan generik yang berlaku untuk topik apa saja.
 - Hindari kata "juga" di awal atau akhir kalimat. Variasikan struktur kalimat.
 - KOREKSI TRANSKRIPSI: Perbaiki kesalahan umum dari speech-to-text, mis. "ekspetasi" → "ekspektasi", "menafigasi" → "menavigasi", "infestasi" → "investasi".
@@ -253,7 +252,7 @@ Input di bawah terdiri dari BEBERAPA rangkuman per bagian. Gabungkan menjadi SAT
 
 Output HANYA:
 - SATU **Ringkasan Eksekutif** (ikhtisar tingkat tinggi, MAKSIMAL 40 kata. JANGAN menyalin kalimat dari Rangkuman—tulis gambaran umum saja.)
-- SATU **Rangkuman** (daftar bernomor 1., 2., 3., ... gabungkan semua poin. Setiap poin harus mengandung detail konkret: nama, angka, contoh nyata. Buang poin yang terlalu generik.)
+- SATU **Rangkuman** (daftar bernomor 1., 2., 3., ... gabungkan semua poin. Setiap poin harus mengandung detail konkret: nama, angka, contoh nyata. Buang poin yang terlalu generik. Tidak ada batas jumlah—sertakan semua yang penting, tapi jangan tambahkan poin yang tidak bernilai. JANGAN gunakan sub-poin a., b., c.—gabungkan semua detail sebagai kalimat lanjutan dalam paragraf bernomor yang sama.)
 - SATU **Insight tambahan** (MAKSIMAL 40 kata total. Takeaway non-obvious DARI narasumber/penulis—BUKAN nasihat hidup umum. Tulis apa yang disampaikan narasumber, bukan saran generik seperti "hidup lebih bahagia".)
 
 Beri baris kosong antara judul section dan isi. Buang informasi kurang penting—prioritaskan yang esensial saja.

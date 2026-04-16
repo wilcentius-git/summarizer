@@ -8,8 +8,7 @@ import { useAuth } from "@/app/contexts/AuthContext";
 import { useGroqApiKey } from "@/app/hooks/useGroqApiKey";
 import { useHistory } from "@/app/hooks/useHistory";
 import { useSummarize } from "@/app/hooks/useSummarize";
-import { useFileUpload, formatSize, isAudioFile } from "@/app/components/FileUpload";
-import { SummaryResultPanel } from "@/app/components/SummaryResult";
+import { useFileUpload, formatSize } from "@/app/components/FileUpload";
 import { ProgressDisplay } from "@/app/components/ProgressDisplay";
 import { HistoryPanel } from "@/app/components/HistoryPanel";
 
@@ -19,13 +18,15 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
 
   const { historyJobs, fetchHistory, deleteJob } = useHistory(user);
+  const [historyFocusSignal, setHistoryFocusSignal] = useState(0);
+  const bumpHistoryFocus = useCallback(() => {
+    setHistoryFocusSignal((n) => n + 1);
+  }, []);
   const {
     summarizeLoading,
     summarizeProgress,
     estimatedSeconds,
     elapsedSeconds,
-    summary,
-    setSummary,
     resumeLoading,
     resumeProgress,
     handleSummarize,
@@ -34,7 +35,7 @@ export default function Home() {
     handleResumeJob,
     pauseResume,
     abortResume,
-  } = useSummarize(groqApiKey, fetchHistory, setError);
+  } = useSummarize(groqApiKey, fetchHistory, setError, bumpHistoryFocus);
 
   const { files, dragActive, addFiles, removeFile, handleDrag, handleDrop, ACCEPTED_FILE_TYPES } =
     useFileUpload(setError);
@@ -266,7 +267,6 @@ export default function Home() {
                           delete next[item.id];
                           return next;
                         });
-                        if (summary?.fileId === item.id) setSummary(null);
                       }}
                       className="p-2 rounded-lg border border-gray-300 text-gray-600 hover:border-red-400 hover:text-red-600 hover:bg-red-50 flex-shrink-0"
                       aria-label="Hapus file"
@@ -293,10 +293,6 @@ export default function Home() {
           </section>
         )}
 
-        {summary && (
-          <SummaryResultPanel summary={summary} setError={setError} />
-        )}
-
         {user && (
           <HistoryPanel
             historyJobs={historyJobs}
@@ -307,6 +303,7 @@ export default function Home() {
             onAbortResume={abortResume}
             onDeleteJob={deleteJob}
             setError={setError}
+            focusHistorySignal={historyFocusSignal}
           />
         )}
       </div>

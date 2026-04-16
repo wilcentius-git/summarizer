@@ -1,9 +1,9 @@
 "use client";
 
-import { useCallback, useState } from "react";
-import ReactMarkdown from "react-markdown";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { RawResult } from "@/app/components/RawResult";
+import { SummaryMarkdownBody } from "@/app/components/SummaryMarkdownBody";
 import { prepareContentForPdf, renderPdfContent } from "@/lib/export-pdf";
-import { ensureBlankLineAfterSections } from "@/lib/summary-format";
 import type { SummaryJobItem } from "@/app/hooks/useHistory";
 
 type HistoryPanelProps = {
@@ -15,6 +15,8 @@ type HistoryPanelProps = {
   onAbortResume: () => void;
   onDeleteJob: (jobId: string) => Promise<void>;
   setError: (err: string | null) => void;
+  /** Increment after a job completes to expand riwayat and scroll it into view. */
+  focusHistorySignal?: number;
 };
 
 export function HistoryPanel({
@@ -26,17 +28,20 @@ export function HistoryPanel({
   onAbortResume,
   onDeleteJob,
   setError,
+  focusHistorySignal = 0,
 }: HistoryPanelProps) {
   const [historyExpanded, setHistoryExpanded] = useState(false);
   const [viewingJobId, setViewingJobId] = useState<string | null>(null);
-  const [copyFeedback, setCopyFeedback] = useState<string | null>(null);
+  const [viewingRawJobId, setViewingRawJobId] = useState<string | null>(null);
+  const sectionRef = useRef<HTMLElement | null>(null);
 
-  const copyHistoryJob = useCallback((text: string, jobId: string) => {
-    if (!text) return;
-    navigator.clipboard.writeText(text);
-    setCopyFeedback(jobId);
-    setTimeout(() => setCopyFeedback(null), 2000);
-  }, []);
+  useEffect(() => {
+    if (focusHistorySignal <= 0) return;
+    setHistoryExpanded(true);
+    requestAnimationFrame(() => {
+      sectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  }, [focusHistorySignal]);
 
   const exportHistoryJobToPdf = useCallback(
     async (text: string, filename: string) => {
@@ -104,15 +109,16 @@ export function HistoryPanel({
       try {
         await onDeleteJob(jobId);
         if (viewingJobId === jobId) setViewingJobId(null);
+        if (viewingRawJobId === jobId) setViewingRawJobId(null);
       } catch {
         setError("Gagal menghapus. Coba lagi.");
       }
     },
-    [onDeleteJob, viewingJobId, setError]
+    [onDeleteJob, viewingJobId, viewingRawJobId, setError]
   );
 
   return (
-    <section className="mt-8 text-center">
+    <section ref={sectionRef} className="mt-8 text-center scroll-mt-4">
       <button
         type="button"
         onClick={() => setHistoryExpanded(!historyExpanded)}
@@ -198,6 +204,17 @@ export function HistoryPanel({
                           )}
                         </>
                       )}
+                      {job.sourceText?.trim() && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setViewingRawJobId(viewingRawJobId === job.id ? null : job.id)
+                          }
+                          className="px-3 py-1.5 rounded-lg bg-kemenkum-blue text-white text-sm font-medium hover:opacity-90"
+                        >
+                          {viewingRawJobId === job.id ? "Tutup" : "Transkrip"}
+                        </button>
+                      )}
                       {job.status === "completed" && job.summaryText && (
                         <>
                           <button
@@ -207,14 +224,7 @@ export function HistoryPanel({
                             }
                             className="px-3 py-1.5 rounded-lg bg-kemenkum-blue text-white text-sm font-medium hover:opacity-90"
                           >
-                            {viewingJobId === job.id ? "Tutup" : "Lihat"}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => copyHistoryJob(job.summaryText!, job.id)}
-                            className="px-3 py-1.5 rounded-lg bg-kemenkum-yellow text-kemenkum-blue text-sm font-medium hover:opacity-90"
-                          >
-                            {copyFeedback === job.id ? "Tersalin!" : "Copy"}
+                            {viewingJobId === job.id ? "Tutup" : "Rangkuman"}
                           </button>
                           <button
                             type="button"
@@ -234,10 +244,22 @@ export function HistoryPanel({
                       </button>
                     </div>
                   </div>
+                  {viewingRawJobId === job.id && job.sourceText?.trim() && (
+                    <RawResult
+                      className="mt-3"
+                      label={
+                        job.fileType?.toLowerCase() === "mp3"
+                          ? "Transkrip mentah"
+                          : "Teks sumber"
+                      }
+                      text={job.sourceText}
+                    />
+                  )}
                   {viewingJobId === job.id && job.summaryText && (
-                    <div className="mt-3 p-3 rounded-lg bg-gray-50 border border-gray-100 text-gray-900 max-h-[400px] overflow-y-auto [&_h1]:text-xl [&_h1]:font-bold [&_h1]:mt-2 [&_h1]:mb-1 [&_h2]:text-lg [&_h2]:font-semibold [&_h2]:mt-3 [&_h2]:mb-1 [&_h3]:text-base [&_h3]:font-medium [&_h3]:mt-2 [&_h3]:mb-1 [&_p]:mb-2 [&_ul]:list-disc [&_ul]:pl-6 [&_ul]:mb-2 [&_ol]:list-decimal [&_ol]:pl-6 [&_ol]:mb-2 [&_li]:mb-0.5 [&_strong]:font-semibold">
-                      <ReactMarkdown>{ensureBlankLineAfterSections(job.summaryText)}</ReactMarkdown>
-                    </div>
+                    <SummaryMarkdownBody
+                      text={job.summaryText}
+                      className="mt-3 p-3 rounded-lg bg-gray-50 border border-gray-100"
+                    />
                   )}
                   {job.status === "failed" && job.errorMessage && (
                     <p className="mt-2 text-xs text-red-600">{job.errorMessage}</p>
@@ -266,9 +288,6 @@ export function HistoryPanel({
           )}
         </div>
       )}
-      <div aria-live="polite" className="sr-only">
-        {copyFeedback ? "Rangkuman berhasil disalin ke clipboard" : ""}
-      </div>
     </section>
   );
 }

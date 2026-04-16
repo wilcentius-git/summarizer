@@ -1,6 +1,6 @@
 {
   "name": "summarizer",
-  "version": "0.25.2",
+  "version": "0.26.0",
   "private": true,
   "scripts": {
     "dev": "concurrently \"next dev\" \"npx tsx scripts/rate-limit-worker.ts\"",

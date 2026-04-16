@@ -209,6 +209,8 @@ export async function POST(
             return;
           }
 
+          send({ type: "sourceText", text: finalText });
+
           // All jobs use summarize flow (chunk + merge). Segmented flow removed.
           if (finalText.length <= SUMMARIZE_CHUNK_SIZE) {
               send({ type: "progress", phase: "summarizing", message: "Merangkum…" });
@@ -219,6 +221,7 @@ export async function POST(
                 status: "completed",
                 progressPercentage: 100,
                 summaryText: finalSummary,
+                sourceText: finalText,
                 errorMessage: null,
                 retryAfter: null,
                 extractedTextForRetry: null,
@@ -302,6 +305,7 @@ export async function POST(
                 status: "completed",
                 progressPercentage: 100,
                 summaryText: finalSummary,
+                sourceText: finalText,
                 errorMessage: null,
                 retryAfter: null,
                 extractedTextForRetry: null,

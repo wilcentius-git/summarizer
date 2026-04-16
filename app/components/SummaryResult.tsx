@@ -1,9 +1,9 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import ReactMarkdown from "react-markdown";
+import { RawResult } from "@/app/components/RawResult";
+import { SummaryMarkdownBody } from "@/app/components/SummaryMarkdownBody";
 import { prepareContentForPdf, renderPdfContent } from "@/lib/export-pdf";
-import { ensureBlankLineAfterSections } from "@/lib/summary-format";
 
 function formatElapsedTime(seconds: number): string {
   const h = Math.floor(seconds / 3600);
@@ -15,7 +15,14 @@ function formatElapsedTime(seconds: number): string {
 }
 
 type SummaryResultProps = {
-  summary: { fileId: string; fileName: string; text: string; elapsedSeconds?: number };
+  summary: {
+    fileId: string;
+    fileName: string;
+    text: string;
+    elapsedSeconds?: number;
+    sourceText?: string;
+    sourceIsAudio?: boolean;
+  };
   setError: (err: string | null) => void;
 };
 
@@ -117,9 +124,17 @@ export function SummaryResultPanel({ summary, setError }: SummaryResultProps) {
           Proses selesai dalam {formatElapsedTime(summary.elapsedSeconds ?? 0)}.
         </p>
       )}
-      <div className="w-full p-4 rounded-lg border border-gray-200 bg-gray-50 text-gray-900 text-left min-h-[200px] max-h-[400px] overflow-y-auto [&_h1]:text-xl [&_h1]:font-bold [&_h1]:mt-2 [&_h1]:mb-1 [&_h2]:text-lg [&_h2]:font-semibold [&_h2]:mt-3 [&_h2]:mb-1 [&_h3]:text-base [&_h3]:font-medium [&_h3]:mt-2 [&_h3]:mb-1 [&_p]:mb-2 [&_ul]:list-disc [&_ul]:pl-6 [&_ul]:mb-2 [&_ol]:list-decimal [&_ol]:pl-6 [&_ol]:mb-2 [&_li]:mb-0.5 [&_strong]:font-semibold">
-        <ReactMarkdown>{ensureBlankLineAfterSections(summary.text)}</ReactMarkdown>
-      </div>
+      {summary.sourceText?.trim() && (
+        <RawResult
+          className="mb-4"
+          label={summary.sourceIsAudio ? "Transkrip mentah" : "Teks sumber"}
+          text={summary.sourceText}
+        />
+      )}
+      <SummaryMarkdownBody
+        text={summary.text}
+        className="w-full p-4 rounded-lg border border-gray-200 bg-gray-50 text-left min-h-[200px]"
+      />
       <div aria-live="polite" className="sr-only">
         {copyFeedback ? "Rangkuman berhasil disalin ke clipboard" : ""}
       </div>

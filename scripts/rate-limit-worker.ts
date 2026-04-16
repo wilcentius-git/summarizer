@@ -54,6 +54,7 @@ async function runWorkerLoop() {
                   status: "completed",
                   progressPercentage: 100,
                   summaryText: result.summary,
+                  sourceText: job.extractedTextForRetry,
                   errorMessage: null,
                   retryAfter: null,
                   extractedTextForRetry: null,

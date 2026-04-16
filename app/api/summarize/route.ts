@@ -135,16 +135,17 @@ export async function POST(request: NextRequest) {
         status?: string;
         progressPercentage?: number;
         summaryText?: string;
+        sourceText?: string | null;
         errorMessage?: string;
         groqAttempts?: number;
         retryAfter?: Date;
-        extractedTextForRetry?: string;
-        jobRetryContext?: string;
+        extractedTextForRetry?: string | null;
+        jobRetryContext?: string | null;
         totalChunks?: number;
         processedChunks?: number;
         partialSummary?: string;
         processedTranscribeChunks?: number;
-        partialTranscript?: string;
+        partialTranscript?: string | null;
         audioPath?: string;
       }) => {
         try {
@@ -254,6 +255,7 @@ export async function POST(request: NextRequest) {
           extractedTextForRetry: text,
           jobRetryContext: JSON.stringify({ flow: "summarize", isAudio }),
         });
+        send({ type: "sourceText", text });
 
         let summary: string;
 
@@ -361,6 +363,11 @@ export async function POST(request: NextRequest) {
             status: "completed",
             progressPercentage: 100,
             summaryText: summary,
+            sourceText: text,
+            extractedTextForRetry: null,
+            jobRetryContext: null,
+            partialTranscript: null,
+            processedTranscribeChunks: 0,
           });
           if (audioPathToCleanup) deleteAudio(audioPathToCleanup);
           send({ type: "summary", text: summary });

@@ -29,17 +29,22 @@ export async function GET() {
         totalChunks: true,
         processedChunks: true,
         extractedTextForRetry: true,
+        sourceText: true,
         audioPath: true,
         partialTranscript: true,
       },
     });
 
-    const jobs = rows.map(({ extractedTextForRetry, audioPath, partialTranscript, ...rest }) => ({
-      ...rest,
-      isResumable:
-        rest.status !== "completed" &&
-        (!!extractedTextForRetry || !!audioPath),
-    }));
+    const jobs = rows.map(
+      ({ extractedTextForRetry, audioPath, partialTranscript, sourceText, ...rest }) => ({
+        ...rest,
+        sourceText:
+          sourceText?.trim() || extractedTextForRetry?.trim() || null,
+        isResumable:
+          rest.status !== "completed" &&
+          (!!extractedTextForRetry || !!audioPath),
+      })
+    );
 
     return NextResponse.json({ jobs });
   } catch (err) {

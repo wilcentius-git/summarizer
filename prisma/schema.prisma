@@ -23,6 +23,8 @@ model SummaryJob {
   uploadTime            DateTime  @default(now()) @map("upload_time")
   status                String    @default("pending") // pending | processing | waiting_rate_limit | completed | failed | cancelled
   summaryText           String?   @map("summary_text")
+  /** Full extracted / transcribed text kept for display after job completes. */
+  sourceText            String?   @map("source_text")
   progressPercentage    Int       @default(0) @map("progress_percentage")
   totalChunks           Int?      @map("total_chunks")
   processedChunks       Int       @default(0) @map("processed_chunks")

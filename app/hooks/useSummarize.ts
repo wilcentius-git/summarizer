@@ -60,13 +60,6 @@ function estimateAudioTranscribeSeconds(durationSeconds: number | undefined, fil
   return Math.max(60, Math.ceil(transTime + sumTime));
 }
 
-export type SummaryResult = {
-  fileId: string;
-  fileName: string;
-  text: string;
-  elapsedSeconds?: number;
-};
-
 export type SummarizeProgress = {
   phase: string;
   current: number;
@@ -79,13 +72,13 @@ export type SummarizeProgress = {
 export function useSummarize(
   groqApiKey: string,
   fetchHistory: () => Promise<void>,
-  setError: (err: string | null) => void
+  setError: (err: string | null) => void,
+  onSuccessfulCompletion?: () => void
 ) {
   const [summarizeLoading, setSummarizeLoading] = useState<string | null>(null);
   const [summarizeProgress, setSummarizeProgress] = useState<SummarizeProgress | null>(null);
   const [estimatedSeconds, setEstimatedSeconds] = useState<number | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
-  const [summary, setSummary] = useState<SummaryResult | null>(null);
   const [currentSummarizeJobId, setCurrentSummarizeJobId] = useState<string | null>(null);
   const summarizeAbortRef = useRef<AbortController | null>(null);
 
@@ -156,7 +149,6 @@ export function useSummarize(
 
       const controller = new AbortController();
       summarizeAbortRef.current = controller;
-      const startTime = Date.now();
 
       try {
         const formData = new FormData();
@@ -213,14 +205,9 @@ export function useSummarize(
                   stepLabel: data.stepLabel,
                 });
               } else if (data.type === "summary") {
-                const elapsed = Math.floor((Date.now() - startTime) / 1000);
-                setSummary({
-                  fileId: item.id,
-                  fileName: item.name,
-                  text: sanitizeSummaryText(data.text ?? ""),
-                  elapsedSeconds: elapsed,
+                void fetchHistory().then(() => {
+                  onSuccessfulCompletion?.();
                 });
-                fetchHistory();
               } else if (data.type === "waiting_rate_limit") {
                 fetchHistory();
                 setError(null);
@@ -251,7 +238,7 @@ export function useSummarize(
         fetchHistory();
       }
     },
-    [groqApiKey, fetchHistory, setError]
+    [groqApiKey, fetchHistory, setError, onSuccessfulCompletion]
   );
 
   const pauseResume = useCallback(async () => {
@@ -300,7 +287,6 @@ export function useSummarize(
 
       const controller = new AbortController();
       resumeAbortRef.current = controller;
-      const startTime = Date.now();
 
       try {
         const res = await fetch(`/api/summary-jobs/${job.id}/resume`, {
@@ -357,14 +343,9 @@ export function useSummarize(
                       : "Memproses…");
                 setResumeProgress({ message: msg });
               } else if (data.type === "summary") {
-                const elapsed = Math.floor((Date.now() - startTime) / 1000);
-                setSummary({
-                  fileId: job.id,
-                  fileName: job.filename,
-                  text: sanitizeSummaryText(data.text ?? ""),
-                  elapsedSeconds: elapsed,
+                void fetchHistory().then(() => {
+                  onSuccessfulCompletion?.();
                 });
-                fetchHistory();
               } else if (data.type === "waiting_rate_limit") {
                 fetchHistory();
                 setError(null);
@@ -393,7 +374,7 @@ export function useSummarize(
         fetchHistory();
       }
     },
-    [groqApiKey, fetchHistory, setError]
+    [groqApiKey, fetchHistory, setError, onSuccessfulCompletion]
   );
 
   return {
@@ -401,8 +382,6 @@ export function useSummarize(
     summarizeProgress,
     estimatedSeconds,
     elapsedSeconds,
-    summary,
-    setSummary,
     resumeLoading,
     resumeProgress,
     handleSummarize,

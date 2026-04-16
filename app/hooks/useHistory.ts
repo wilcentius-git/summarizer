@@ -6,6 +6,8 @@ export type SummaryJobItem = {
   id: string;
   filename: string;
   fileType: string;
+  /** Extracted / transcribed text for display (from DB or legacy retry field). */
+  sourceText?: string | null;
   uploadTime: string;
   status: string;
   summaryText: string | null;

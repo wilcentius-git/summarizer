@@ -9,7 +9,7 @@ const nextConfig = {
     "fluent-ffmpeg",
   ],
   experimental: {
-    proxyClientMaxBodySize: "25mb",
+    proxyClientMaxBodySize: "200mb",
   },
 };
 

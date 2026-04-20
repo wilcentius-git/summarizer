@@ -80,6 +80,7 @@ export function useSummarize(
   const [estimatedSeconds, setEstimatedSeconds] = useState<number | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [currentSummarizeJobId, setCurrentSummarizeJobId] = useState<string | null>(null);
+  const [liveSourceText, setLiveSourceText] = useState<string>("");
   const summarizeAbortRef = useRef<AbortController | null>(null);
 
   const [resumeLoading, setResumeLoading] = useState<string | null>(null);
@@ -139,6 +140,7 @@ export function useSummarize(
       }
       setError(null);
       setCurrentSummarizeJobId(null);
+      setLiveSourceText("");
       setSummarizeLoading(item.id);
       setSummarizeProgress({ phase: "extracting", current: 0, total: 1 });
       setEstimatedSeconds(
@@ -204,6 +206,8 @@ export function useSummarize(
                   step: data.step,
                   stepLabel: data.stepLabel,
                 });
+              } else if (data.type === "sourceText") {
+                setLiveSourceText(sanitizeSummaryText(data.text ?? ""));
               } else if (data.type === "summary") {
                 void fetchHistory().then(() => {
                   onSuccessfulCompletion?.();
@@ -234,6 +238,7 @@ export function useSummarize(
         setSummarizeProgress(null);
         setEstimatedSeconds(null);
         setCurrentSummarizeJobId(null);
+        setLiveSourceText("");
         summarizeAbortRef.current = null;
         fetchHistory();
       }
@@ -380,6 +385,7 @@ export function useSummarize(
   return {
     summarizeLoading,
     summarizeProgress,
+    liveSourceText,
     estimatedSeconds,
     elapsedSeconds,
     resumeLoading,

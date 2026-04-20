@@ -10,8 +10,8 @@ import { sleep } from "@/lib/groq";
 export const GROQ_TRANSCRIPTION_URL =
   "https://api.groq.com/openai/v1/audio/transcriptions";
 export const GROQ_WHISPER_MODEL = "whisper-large-v3-turbo";
-/** Groq free tier max audio file size (25 MB). */
-export const MAX_AUDIO_SIZE_BYTES = 25 * 1024 * 1024;
+/** Max uploaded audio file size. Long files are chunked before each Groq transcription request. */
+export const MAX_AUDIO_SIZE_BYTES = 200 * 1024 * 1024;
 
 export const AUDIO_MIME_TYPES = [
   "audio/mpeg", // mp3

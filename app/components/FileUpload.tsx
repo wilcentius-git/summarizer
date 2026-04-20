@@ -4,7 +4,7 @@ import { useCallback, useState } from "react";
 
 const MAX_FILE_SIZE_MB = 500;
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
-const MAX_AUDIO_SIZE_MB = 25;
+const MAX_AUDIO_SIZE_MB = 200;
 const MAX_AUDIO_SIZE_BYTES = MAX_AUDIO_SIZE_MB * 1024 * 1024;
 
 const ACCEPTED_FILE_TYPES =

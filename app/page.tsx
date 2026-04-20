@@ -11,6 +11,7 @@ import { useSummarize } from "@/app/hooks/useSummarize";
 import { useFileUpload, formatSize } from "@/app/components/FileUpload";
 import { ProgressDisplay } from "@/app/components/ProgressDisplay";
 import { HistoryPanel } from "@/app/components/HistoryPanel";
+import { RawResult } from "@/app/components/RawResult";
 
 export default function Home() {
   const { user, logout } = useAuth();
@@ -25,6 +26,7 @@ export default function Home() {
   const {
     summarizeLoading,
     summarizeProgress,
+    liveSourceText,
     estimatedSeconds,
     elapsedSeconds,
     resumeLoading,
@@ -231,6 +233,17 @@ export default function Home() {
                       />
                     </div>
                   )}
+                  {summarizeLoading === item.id &&
+                    summarizeProgress &&
+                    liveSourceText.trim() &&
+                    ((summarizeProgress.step ?? 1) >= 2 || summarizeProgress.phase !== "transcribing") && (
+                      <RawResult
+                        className="mt-1"
+                        label="Transkrip mentah (preview)"
+                        text={liveSourceText}
+                        isPreviewOnly
+                      />
+                    )}
                   <div className="flex flex-wrap items-center gap-2 justify-end min-w-0">
                     <button
                       type="button"

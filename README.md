@@ -5,7 +5,7 @@ A simple web app to upload documents and get AI-generated summaries.
 ## Features
 
 - **Upload documents** – Add files via file picker or drag and drop (max 500 MB per file). Supports: **PDF**, **DOCX**, **DOC**, **TXT**, **RTF**, **ODT**, **SRT**, **MP3**, **WAV**, **M4A**, **WebM**, **FLAC**, **OGG**.
-- **Summarize** – Extract text and get a concise summary via Groq (Llama). Supports scanned PDFs via OCR (Groq Vision) and **audio transcription** via Groq Whisper (MP3, WAV, etc., max 25 MB for free tier).
+- **Summarize** – Extract text and get a concise summary via Groq (Llama). Supports scanned PDFs via OCR (Groq Vision) and **audio transcription** via Groq Whisper (MP3, WAV, etc., max 200 MB upload; long audio is chunked for the API).
 - **Optional technical terms** – After you add a file to the queue, you can fill **Istilah teknis (opsional)** with abbreviations or jargon (e.g. `PSSI, KPI, XSS, CI/CD`). They are sent to Whisper as a transcription **prompt** (helps spelling of rare terms) and to the summarizer so it keeps those spellings and interprets the domain better.
 - **Segmented Summarize** – Works on text with **label and opinion format** (e.g., speaker-labeled transcripts, structured opinions). The model checks the format first; if not found, returns "no segmented opinion format". For **audio (MP3, etc.)**: optionally use **pyannote.audio** (via WhisperX) for speaker diarization when a Hugging Face token is provided.
 
@@ -207,6 +207,6 @@ Or connect your repo to [Vercel](https://vercel.com) for automatic deployments.
 
 ### Limits
 
-- Max file size: 500 MB (documents), 25 MB (audio, Groq free tier)
+- Max file size: 500 MB (documents), 200 MB (audio)
 - Max transcript length (meeting): 30,000 chars
 - Max PDF pages for OCR: 20

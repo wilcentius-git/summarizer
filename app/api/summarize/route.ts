@@ -102,7 +102,7 @@ export async function POST(request: NextRequest) {
   if (file.size > maxSize) {
     return NextResponse.json(
       {
-        error: `File exceeds ${maxSizeMB} MB${isAudio ? " (audio limit for free tier)" : ""}.`,
+        error: `File exceeds ${maxSizeMB} MB${isAudio ? " (audio limit)" : ""}.`,
       },
       { status: 400 }
     );

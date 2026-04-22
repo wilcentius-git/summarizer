@@ -23,12 +23,11 @@ import {
   deduplicateSummaryPoints,
   isGroqRateLimitError,
   mergeSummaries,
-  sleep,
-  SUMMARIZE_CHUNK_DELAY_MS,
-  SUMMARIZE_CHUNK_SIZE,
-  SUMMARIZE_MERGE_PRE_DELAY_MS,
+  sleepChunkPacingFromGroqHeaders,
   splitIntoChunks,
   summarizeWithGroq,
+  SUMMARIZE_PIPELINE_STANDARD,
+  type SummarizePipelineConfig,
 } from "@/lib/groq";
 import { isJobCancelled } from "@/lib/check-cancelled";
 import {
@@ -38,6 +37,7 @@ import {
 import { audioExists, deleteAudio } from "@/lib/audio-storage";
 import { deduplicateParagraphs } from "@/lib/groq";
 import { truncateSummarySections } from "@/lib/summary-format";
+import { resolveGroqApiKey } from "@/lib/resolve-groq-api-key";
 
 /** Allow long-running summarization. */
 export const maxDuration = 7200;
@@ -86,26 +86,39 @@ export async function POST(
       );
     }
 
-    let context: { flow?: string; isAudio?: boolean } = {};
+    let context: { isAudio?: boolean } = {};
     try {
       if (resumableJob.jobRetryContext) {
-        context = JSON.parse(resumableJob.jobRetryContext) as { flow?: string };
+        context = JSON.parse(resumableJob.jobRetryContext) as {
+          isAudio?: boolean;
+        };
       }
     } catch {
       return NextResponse.json({ error: "Invalid job retry context." }, { status: 400 });
     }
 
     const body = await request.json().catch(() => ({}));
-    const apiKey = (body.groqApiKey as string)?.trim();
+    const apiKey = resolveGroqApiKey(body.groqApiKey as string | null | undefined);
     if (!apiKey) {
       return NextResponse.json(
-        { error: "Groq API key is required in request body." },
+        {
+          error:
+            "Groq API key is required. Set GROQ_API_KEY in .env.local on the server, or send groqApiKey in the request (kunci groq sendiri opsional).",
+        },
         { status: 400 }
       );
     }
 
     const stream = new ReadableStream({
       async start(controller) {
+        const pipelineJobStart = Date.now();
+        let transcribeStartMs: number | undefined;
+        let transcribeEndMs: number | undefined;
+        let summarizeStartMs: number | undefined;
+        let summarizeEndMs: number | undefined;
+        let mergeStartMs: number | undefined;
+        let mergeEndMs: number | undefined;
+
         const send = (obj: object) => {
           try {
             sendStreamLine(controller, obj);
@@ -117,10 +130,15 @@ export async function POST(
         const updateJob = async (
           updates: Prisma.SummaryJobUpdateInput & {
             processedChunks?: number;
-            partialSummary?: string;
+            partialSummary?: string | null;
             processedTranscribeChunks?: number;
             partialTranscript?: string | null;
             audioPath?: string | null;
+            totalDurationMs?: number;
+            transcribeDurationMs?: number;
+            summarizeDurationMs?: number;
+            mergeDurationMs?: number;
+            completedAt?: Date;
           }
         ) => {
           try {
@@ -132,6 +150,8 @@ export async function POST(
             console.error("SummaryJob resume update failed:", e);
           }
         };
+
+        const pipeline: SummarizePipelineConfig = SUMMARIZE_PIPELINE_STANDARD;
 
         try {
           await updateJob({ status: "processing" });
@@ -158,11 +178,13 @@ export async function POST(
             });
 
             try {
+              transcribeStartMs = Date.now();
               text = await transcribeWithGroq(buffer, apiKey, {
                 language: "id",
                 fileName: resumableJob.filename,
                 startFromChunk,
                 initialTranscripts,
+                chunkDelayMs: pipeline.transcribeChunkDelayMs,
                 isCancelled: () => isJobCancelled(jobId),
                 onChunkProgress: (current, total) => {
                   send({
@@ -180,6 +202,10 @@ export async function POST(
                   });
                 },
               });
+              transcribeEndMs = Date.now();
+              console.log(
+                `>>> [TIMING] Transcription done in ${transcribeEndMs - transcribeStartMs!}ms`
+              );
             } catch (transcribeErr) {
               if (transcribeErr instanceof TranscribeCancelledError) {
                 controller.close();
@@ -197,7 +223,10 @@ export async function POST(
             text = deduplicateParagraphs(text);
             await updateJob({
               extractedTextForRetry: text,
-              jobRetryContext: JSON.stringify({ flow: "summarize", isAudio: true }),
+              jobRetryContext: JSON.stringify({
+                isAudio: true,
+                summarizeChunkSize: pipeline.summarizeChunkSize,
+              }),
             });
           }
 
@@ -211,14 +240,19 @@ export async function POST(
 
           send({ type: "sourceText", text: finalText });
 
-          // All jobs use summarize flow (chunk + merge). Segmented flow removed.
-          if (finalText.length <= SUMMARIZE_CHUNK_SIZE) {
+          if (finalText.length <= pipeline.summarizeChunkSize) {
               send({ type: "progress", phase: "summarizing", message: "Merangkum…" });
+              summarizeStartMs = Date.now();
               const summary = await summarizeWithGroq(finalText, apiKey);
+              summarizeEndMs = Date.now();
+              console.log(
+                `>>> [TIMING] Summarization done in ${summarizeEndMs - summarizeStartMs!}ms`
+              );
               let finalSummary = deduplicateSummaryPoints(summary || "Rangkuman tidak dapat dibuat.");
               finalSummary = truncateSummarySections(finalSummary, 40);
               await updateJob({
                 status: "completed",
+                partialSummary: null, // clear merge checkpoint
                 progressPercentage: 100,
                 summaryText: finalSummary,
                 sourceText: finalText,
@@ -229,6 +263,18 @@ export async function POST(
                 audioPath: null,
                 partialTranscript: null,
                 processedTranscribeChunks: 0,
+                // Timing fields
+                totalDurationMs: Date.now() - pipelineJobStart,
+                transcribeDurationMs: transcribeEndMs && transcribeStartMs
+                  ? transcribeEndMs - transcribeStartMs
+                  : undefined,
+                summarizeDurationMs: summarizeEndMs && summarizeStartMs
+                  ? summarizeEndMs - summarizeStartMs
+                  : undefined,
+                mergeDurationMs: mergeEndMs && mergeStartMs
+                  ? mergeEndMs - mergeStartMs
+                  : undefined,
+                completedAt: new Date(),
               });
               if (resumableJob.audioPath) deleteAudio(resumableJob.audioPath);
               send({ type: "summary", text: finalSummary });
@@ -242,7 +288,7 @@ export async function POST(
                 }
               }
               const startFromChunk = resumableJob.processedChunks ?? 0;
-              const chunks = splitIntoChunks(finalText, SUMMARIZE_CHUNK_SIZE);
+              const chunks = splitIntoChunks(finalText, pipeline.summarizeChunkSize);
               const total = chunks.length;
 
               send({
@@ -254,12 +300,32 @@ export async function POST(
               });
 
               const accumulatedSummaries = [...initialSummaries];
+              const jobStart = Date.now();
+              const delayMs = pipeline.summarizeChunkDelayMs;
+              summarizeStartMs = Date.now();
               for (let i = startFromChunk; i < chunks.length; i++) {
                 if (await isJobCancelled(jobId)) {
                   controller.close();
                   return;
                 }
-                const part = await summarizeWithGroq(chunks[i], apiKey, { isChunk: true });
+                const chunk = chunks[i];
+                const chunkStart = Date.now();
+                console.log(`[CHUNK ${i + 1}/${total}] Starting. Text length: ${chunk.length} chars`);
+
+                const { content: part, headers: responseHeaders } = await summarizeWithGroq(
+                  chunk,
+                  apiKey,
+                  {
+                    isChunk: true,
+                    isAudio: context.isAudio === true,
+                    returnHeaders: true,
+                  }
+                );
+                const result = part;
+                console.log(
+                  `>>> [CHUNK ${i + 1}/${total}] Summary length: ${result.length} chars (~${Math.round(result.length / 4)} tokens)`
+                );
+                console.log(`[CHUNK ${i + 1}/${total}] Done in ${Date.now() - chunkStart}ms`);
                 accumulatedSummaries.push(part);
                 await updateJob({
                   processedChunks: i + 1,
@@ -273,20 +339,58 @@ export async function POST(
                   message: `Bagian ${i + 1} dari ${total} selesai`,
                 });
                 if (i < chunks.length - 1) {
-                  await sleep(SUMMARIZE_CHUNK_DELAY_MS);
+                  console.log(`[CHUNK ${i + 1}/${total}] Sleeping ${delayMs}ms`);
+                  await sleepChunkPacingFromGroqHeaders(responseHeaders, i, total);
+                  console.log(
+                    `[CHUNK ${i + 1}/${total}] Sleep done. Total elapsed: ${Date.now() - jobStart}ms`
+                  );
                 }
               }
+
+              summarizeEndMs = Date.now();
+              console.log(
+                `>>> [TIMING] Summarization done in ${summarizeEndMs - summarizeStartMs!}ms`
+              );
 
               if (await isJobCancelled(jobId)) {
                 controller.close();
                 return;
               }
+
+              // Check if merge was interrupted mid-way
+              let mergeStartSummaries = accumulatedSummaries; // default: all chunk summaries
+
+              if (resumableJob.partialSummary) {
+                try {
+                  const parsed = JSON.parse(resumableJob.partialSummary) as {
+                    type?: string;
+                    totalChunks?: number;
+                    batchResults?: string[];
+                  };
+                  if (
+                    parsed?.type === "merge_checkpoint" &&
+                    parsed?.totalChunks === accumulatedSummaries.length &&
+                    Array.isArray(parsed?.batchResults) &&
+                    parsed.batchResults.length > 0
+                  ) {
+                    // Merge was interrupted — resume from saved batch results
+                    console.log(
+                      `>>> [MERGE RESUME] Found ${parsed.batchResults.length} saved batch results. Resuming merge from checkpoint.`
+                    );
+                    mergeStartSummaries = parsed.batchResults;
+                  }
+                } catch {
+                  // Not a merge checkpoint — use full chunk summaries
+                }
+              }
+
               send({ type: "progress", phase: "merge", message: "Menggabungkan rangkuman…" });
-              await sleep(SUMMARIZE_MERGE_PRE_DELAY_MS);
-              const summary = await mergeSummaries(
-                accumulatedSummaries,
-                apiKey,
-                (cur, tot) => {
+              console.log(
+                `>>> [MERGE] Phase starting. Total chunks: ${accumulatedSummaries.length}`
+              );
+              mergeStartMs = Date.now();
+              const summary = await mergeSummaries(mergeStartSummaries, apiKey, {
+                onProgress: (cur, tot) => {
                   send({
                     type: "progress",
                     phase: "merge",
@@ -297,12 +401,27 @@ export async function POST(
                         ? `Menggabungkan bagian ${cur} dari ${tot}…`
                         : "Menggabungkan rangkuman…",
                   });
-                }
-              );
+                },
+                onBatchComplete: async (batchResults) => {
+                  await updateJob({
+                    partialSummary: JSON.stringify({
+                      type: "merge_checkpoint",
+                      totalChunks: accumulatedSummaries.length,
+                      batchResults,
+                    }),
+                  });
+                  console.log(
+                    `>>> [MERGE CHECKPOINT] Saved ${batchResults.length} batch results to DB`
+                  );
+                },
+              });
+              mergeEndMs = Date.now();
+              console.log(`>>> [TIMING] Merge done in ${mergeEndMs - mergeStartMs!}ms`);
               let finalSummary = deduplicateSummaryPoints(summary || "Rangkuman tidak dapat dibuat.");
               finalSummary = truncateSummarySections(finalSummary, 40);
               await updateJob({
                 status: "completed",
+                partialSummary: null, // clear merge checkpoint
                 progressPercentage: 100,
                 summaryText: finalSummary,
                 sourceText: finalText,
@@ -313,6 +432,18 @@ export async function POST(
                 audioPath: null,
                 partialTranscript: null,
                 processedTranscribeChunks: 0,
+                // Timing fields
+                totalDurationMs: Date.now() - pipelineJobStart,
+                transcribeDurationMs: transcribeEndMs && transcribeStartMs
+                  ? transcribeEndMs - transcribeStartMs
+                  : undefined,
+                summarizeDurationMs: summarizeEndMs && summarizeStartMs
+                  ? summarizeEndMs - summarizeStartMs
+                  : undefined,
+                mergeDurationMs: mergeEndMs && mergeStartMs
+                  ? mergeEndMs - mergeStartMs
+                  : undefined,
+                completedAt: new Date(),
               });
               if (resumableJob.audioPath) deleteAudio(resumableJob.audioPath);
               send({ type: "summary", text: finalSummary });

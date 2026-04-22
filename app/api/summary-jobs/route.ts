@@ -32,6 +32,11 @@ export async function GET() {
         sourceText: true,
         audioPath: true,
         partialTranscript: true,
+        totalDurationMs: true,
+        transcribeDurationMs: true,
+        summarizeDurationMs: true,
+        mergeDurationMs: true,
+        completedAt: true,
       },
     });
 

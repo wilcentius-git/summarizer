@@ -31,5 +31,6 @@ jobs:
       - name: Build
         env:
           JWT_SECRET: ci-build-placeholder-do-not-use-in-production-32chars
+          DATABASE_URL: file:./prisma/ci.db
           NEXT_TELEMETRY_DISABLED: "1"
         run: npm run build

@@ -10,7 +10,7 @@ import {
   isGroqRateLimitError,
   mergeSummaries,
   sleep,
-  SUMMARIZE_CHUNK_DELAY_MS,
+  sleepChunkPacingFromGroqHeaders,
   SUMMARIZE_CHUNK_SIZE,
   SUMMARIZE_MERGE_PRE_DELAY_MS,
   splitIntoChunks,
@@ -25,6 +25,16 @@ export async function processRateLimitedJob(
   const text = job.extractedTextForRetry;
   if (!text?.trim()) {
     return { success: false, error: "No extracted text for retry." };
+  }
+
+  let isAudio = false;
+  try {
+    if (job.jobRetryContext) {
+      const ctx = JSON.parse(job.jobRetryContext) as { isAudio?: boolean };
+      isAudio = ctx.isAudio === true;
+    }
+  } catch {
+    // ignore invalid context
   }
 
   try {
@@ -44,11 +54,21 @@ export async function processRateLimitedJob(
       const chunks = splitIntoChunks(text, SUMMARIZE_CHUNK_SIZE);
       const chunkSummaries = [...initialSummaries];
       for (let i = startFromChunk; i < chunks.length; i++) {
-        const part = await summarizeWithGroq(chunks[i], apiKey, { isChunk: true });
+        const { content: part, headers: responseHeaders } = await summarizeWithGroq(
+          chunks[i],
+          apiKey,
+          {
+            isChunk: true,
+            isAudio,
+            returnHeaders: true,
+          }
+        );
+        const result = part;
+        console.log(
+          `>>> [CHUNK ${i + 1}/${chunks.length}] Summary length: ${result.length} chars (~${Math.round(result.length / 4)} tokens)`
+        );
         chunkSummaries.push(part);
-        if (i < chunks.length - 1) {
-          await sleep(SUMMARIZE_CHUNK_DELAY_MS);
-        }
+        await sleepChunkPacingFromGroqHeaders(responseHeaders, i, chunks.length);
       }
       await sleep(SUMMARIZE_MERGE_PRE_DELAY_MS);
       summary = await mergeSummaries(chunkSummaries, apiKey);

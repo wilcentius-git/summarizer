@@ -1,15 +1,20 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { RawResult } from "@/app/components/RawResult";
 import { SummaryMarkdownBody } from "@/app/components/SummaryMarkdownBody";
+import { useAuth } from "@/app/contexts/AuthContext";
 import { prepareContentForPdf, renderPdfContent } from "@/lib/export-pdf";
+import { signAndExportPdf } from "@/lib/sign-and-export-pdf";
+import { PassphraseModal } from "@/components/PassphraseModal";
 import type { SummaryJobItem } from "@/app/hooks/useHistory";
+import type jsPDF from "jspdf";
 
 type HistoryPanelProps = {
   historyJobs: SummaryJobItem[];
   resumeLoading: string | null;
-  resumeProgress: { message?: string } | null;
+  resumeProgress: { message?: string; mergeRound?: number } | null;
   onResumeJob: (job: SummaryJobItem) => void;
   onPauseResume: () => void;
   onAbortResume: () => void;
@@ -18,6 +23,53 @@ type HistoryPanelProps = {
   /** Increment after a job completes to expand riwayat and scroll it into view. */
   focusHistorySignal?: number;
 };
+
+function TimingTooltip({ label, phases }: { label: string; phases: string }) {
+  const [visible, setVisible] = useState(false);
+  const [coords, setCoords] = useState({ top: 0, left: 0 });
+  const ref = useRef<HTMLSpanElement>(null);
+
+  const handleMouseEnter = () => {
+    if (ref.current) {
+      const rect = ref.current.getBoundingClientRect();
+      setCoords({
+        top: rect.bottom + 8,
+        left: rect.left,
+      });
+    }
+    setVisible(true);
+  };
+
+  return (
+    <>
+      <span
+        ref={ref}
+        onMouseEnter={handleMouseEnter}
+        onMouseLeave={() => setVisible(false)}
+        className="cursor-default"
+      >
+        {label}
+      </span>
+      {visible && typeof window !== "undefined" && createPortal(
+        <span
+          style={{ top: coords.top, left: coords.left }}
+          className="fixed z-[9999] px-3 py-2 bg-gray-900 text-white text-xs rounded-lg shadow-lg pointer-events-none"
+        >
+          <span
+            className="absolute -top-1.5 left-4 w-0 h-0"
+            style={{
+              borderLeft: "6px solid transparent",
+              borderRight: "6px solid transparent",
+              borderBottom: "6px solid #111827",
+            }}
+          />
+          <span className="text-gray-300">{phases}</span>
+        </span>,
+        document.body
+      )}
+    </>
+  );
+}
 
 export function HistoryPanel({
   historyJobs,
@@ -30,9 +82,14 @@ export function HistoryPanel({
   setError,
   focusHistorySignal = 0,
 }: HistoryPanelProps) {
+  const { user } = useAuth();
   const [historyExpanded, setHistoryExpanded] = useState(false);
-  const [viewingJobId, setViewingJobId] = useState<string | null>(null);
-  const [viewingRawJobId, setViewingRawJobId] = useState<string | null>(null);
+  const [modal, setModal] = useState<{
+    type: "transkrip" | "rangkuman";
+    job: SummaryJobItem;
+  } | null>(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
   const sectionRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
@@ -43,9 +100,22 @@ export function HistoryPanel({
     });
   }, [focusHistorySignal]);
 
-  const exportHistoryJobToPdf = useCallback(
-    async (text: string, filename: string) => {
-      if (!text) return;
+  useEffect(() => {
+    if (!modal) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setModal(null);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [modal]);
+
+  const buildHistoryJobJsPdf = useCallback(
+    async (
+      text: string,
+      filename: string,
+      exportType: "transkrip" | "rangkuman" = "rangkuman"
+    ): Promise<jsPDF | null> => {
+      if (!text) return null;
       const content = prepareContentForPdf(text);
       const dateStr = new Date().toLocaleString("id-ID", {
         day: "numeric",
@@ -54,67 +124,91 @@ export function HistoryPanel({
         hour: "2-digit",
         minute: "2-digit",
       });
-      const baseName = filename?.replace(/\.[^.]+$/, "") ?? "document";
-      const fileName = `${baseName}-summary.pdf`;
+      const { jsPDF } = await import("jspdf");
+      const doc = new jsPDF({ unit: "mm", format: "a4" });
+      const margin = 20;
+      const maxWidth = 210 - margin * 2;
+      const lineHeight = 6;
+      const paragraphSpacing = 4;
+      const headingSpacing = 2;
+      const pageHeight = 297;
+      const maxY = pageHeight - margin;
+
+      let y = margin;
+
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10);
+      doc.setTextColor(100, 100, 100);
+
+      const headerMaxW = maxWidth - 20;
+      const titleText = `Dokumen: ${filename ?? "—"}`;
+      const titleLineCount = doc.splitTextToSize(titleText, headerMaxW).length;
+      doc.text(titleText, margin, y, { maxWidth: headerMaxW });
+      y += titleLineCount * lineHeight;
+
+      doc.text(`Tanggal dibuat: ${dateStr}`, margin, y);
+      y += lineHeight;
+      y += 4;
+
+      doc.setTextColor(0, 0, 0);
+      renderPdfContent(doc, content, {
+        margin,
+        maxWidth,
+        lineHeight,
+        paragraphSpacing,
+        headingSpacing,
+        maxY,
+        startY: y,
+        fontSize: 11,
+      });
+
+      return doc;
+    },
+    []
+  );
+
+  const onPassphraseExportConfirm = useCallback(
+    async (passphrase: string) => {
+      if (!modal) {
+        setIsModalOpen(false);
+        return;
+      }
+      if (!user) {
+        window.alert("Sesi tidak valid. Silakan masuk kembali.");
+        setIsModalOpen(false);
+        return;
+      }
+      setIsLoading(true);
       try {
-        const { jsPDF } = await import("jspdf");
-        const doc = new jsPDF({ unit: "mm", format: "a4" });
-        const margin = 20;
-        const maxWidth = 210 - margin * 2;
-        const lineHeight = 6;
-        const paragraphSpacing = 4;
-        const headingSpacing = 2;
-        const pageHeight = 297;
-        const maxY = pageHeight - margin;
-
-        let y = margin;
-
-        doc.setFont("helvetica", "normal");
-        doc.setFontSize(10);
-        doc.setTextColor(100, 100, 100);
-
-        const headerMaxW = maxWidth - 20;
-        const titleText = `Dokumen: ${filename ?? "—"}`;
-        const titleLineCount = doc.splitTextToSize(titleText, headerMaxW).length;
-        doc.text(titleText, margin, y, { maxWidth: headerMaxW });
-        y += titleLineCount * lineHeight;
-
-        doc.text(`Tanggal dibuat: ${dateStr}`, margin, y);
-        y += lineHeight;
-        y += 4;
-
-        doc.setTextColor(0, 0, 0);
-        y = renderPdfContent(doc, content, {
-          margin,
-          maxWidth,
-          lineHeight,
-          paragraphSpacing,
-          headingSpacing,
-          maxY,
-          startY: y,
-          fontSize: 11,
-        });
-
-        doc.save(fileName);
-      } catch (err) {
-        setError("Gagal mendownload PDF. Coba lagi.");
-        console.error(err);
+        const text =
+          modal.type === "rangkuman" ? modal.job.summaryText! : modal.job.sourceText!;
+        const doc = await buildHistoryJobJsPdf(text, modal.job.filename, modal.type);
+        if (!doc) {
+          throw new Error("Tidak ada teks untuk diekspor.");
+        }
+        await signAndExportPdf(doc, passphrase, user.id);
+        setIsModalOpen(false);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "Gagal mengekspor PDF. Coba lagi.";
+        window.alert(msg);
+        console.error(e);
+      } finally {
+        setIsLoading(false);
       }
     },
-    [setError]
+    [modal, user, buildHistoryJobJsPdf]
   );
 
   const deleteHistoryJob = useCallback(
     async (jobId: string) => {
       try {
         await onDeleteJob(jobId);
-        if (viewingJobId === jobId) setViewingJobId(null);
-        if (viewingRawJobId === jobId) setViewingRawJobId(null);
+        if (modal?.job.id === jobId) setModal(null);
       } catch {
         setError("Gagal menghapus. Coba lagi.");
       }
     },
-    [onDeleteJob, viewingJobId, viewingRawJobId, setError]
+    [onDeleteJob, modal?.job.id, setError]
   );
 
   return (
@@ -133,11 +227,11 @@ export function HistoryPanel({
           {historyJobs.length === 0 ? (
             <p className="text-sm text-gray-500 py-4">Belum ada riwayat. Unggah dan rangkum file untuk melihat riwayat di sini.</p>
           ) : (
-            <ul className="space-y-2 max-h-[400px] overflow-y-auto">
+            <ul className="space-y-2 max-h-[400px] overflow-y-auto overflow-x-visible">
               {historyJobs.map((job) => (
                 <li
                   key={job.id}
-                  className="p-3 rounded-lg border border-gray-200 bg-white shadow-sm"
+                  className="p-3 rounded-lg borderra border-gray-200 bg-white shadow-sm overflow-visible"
                 >
                   <div className="flex items-center justify-between gap-2">
                     <div className="min-w-0 flex-1">
@@ -146,7 +240,7 @@ export function HistoryPanel({
                         {new Date(job.uploadTime).toLocaleString("id-ID")} • {job.fileType.toUpperCase()}
                       </p>
                       <span
-                        className={`inline-block mt-1 px-2 py-0.5 rounded text-xs font-medium ${
+                        className={`inline-block mt-1 px-2 py-0.5 rounded text-xs font-medium group cursor-default ${
                           job.status === "completed"
                             ? "bg-emerald-100 text-emerald-800"
                             : job.status === "failed"
@@ -161,7 +255,27 @@ export function HistoryPanel({
                         }`}
                       >
                         {job.status === "completed"
-                          ? "Selesai"
+                          ? job.totalDurationMs != null
+                            ? (() => {
+                                const totalSec = Math.floor(job.totalDurationMs / 1000);
+                                const minutes = Math.floor(totalSec / 60);
+                                const seconds = totalSec % 60;
+                                const totalLabel = minutes > 0
+                                  ? `${minutes}m ${seconds}d`
+                                  : `${seconds}d`;
+                                const phases = [
+                                  job.transcribeDurationMs != null && `Transkripsi: ${Math.floor(job.transcribeDurationMs / 1000)}d`,
+                                  job.summarizeDurationMs != null && `Rangkum: ${Math.floor(job.summarizeDurationMs / 1000)}d`,
+                                  job.mergeDurationMs != null && `Gabung: ${Math.floor(job.mergeDurationMs / 1000)}d`,
+                                ].filter(Boolean).join(" • ");
+                                return (
+                                  <TimingTooltip
+                                    label={`Selesai dalam ${totalLabel}`}
+                                    phases={phases}
+                                  />
+                                );
+                              })()
+                            : "Selesai"
                           : job.status === "failed"
                             ? "Gagal"
                             : job.status === "cancelled"
@@ -207,33 +321,20 @@ export function HistoryPanel({
                       {job.sourceText?.trim() && (
                         <button
                           type="button"
-                          onClick={() =>
-                            setViewingRawJobId(viewingRawJobId === job.id ? null : job.id)
-                          }
+                          onClick={() => setModal({ type: "transkrip", job })}
                           className="px-3 py-1.5 rounded-lg bg-kemenkum-blue text-white text-sm font-medium hover:opacity-90"
                         >
-                          {viewingRawJobId === job.id ? "Tutup" : "Transkrip"}
+                          Transkrip
                         </button>
                       )}
                       {job.status === "completed" && job.summaryText && (
-                        <>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setViewingJobId(viewingJobId === job.id ? null : job.id)
-                            }
-                            className="px-3 py-1.5 rounded-lg bg-kemenkum-blue text-white text-sm font-medium hover:opacity-90"
-                          >
-                            {viewingJobId === job.id ? "Tutup" : "Rangkuman"}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => exportHistoryJobToPdf(job.summaryText!, job.filename)}
-                            className="px-3 py-1.5 rounded-lg bg-kemenkum-yellow text-kemenkum-blue text-sm font-medium hover:opacity-90"
-                          >
-                            Export PDF
-                          </button>
-                        </>
+                        <button
+                          type="button"
+                          onClick={() => setModal({ type: "rangkuman", job })}
+                          className="px-3 py-1.5 rounded-lg bg-kemenkum-blue text-white text-sm font-medium hover:opacity-90"
+                        >
+                          Rangkuman
+                        </button>
                       )}
                       <button
                         type="button"
@@ -244,23 +345,6 @@ export function HistoryPanel({
                       </button>
                     </div>
                   </div>
-                  {viewingRawJobId === job.id && job.sourceText?.trim() && (
-                    <RawResult
-                      className="mt-3"
-                      label={
-                        job.fileType?.toLowerCase() === "mp3"
-                          ? "Transkrip mentah"
-                          : "Teks sumber"
-                      }
-                      text={job.sourceText}
-                    />
-                  )}
-                  {viewingJobId === job.id && job.summaryText && (
-                    <SummaryMarkdownBody
-                      text={job.summaryText}
-                      className="mt-3 p-3 rounded-lg bg-gray-50 border border-gray-100"
-                    />
-                  )}
                   {job.status === "failed" && job.errorMessage && (
                     <p className="mt-2 text-xs text-red-600">{job.errorMessage}</p>
                   )}
@@ -288,6 +372,69 @@ export function HistoryPanel({
           )}
         </div>
       )}
+      {modal && (
+        <>
+          {/* Backdrop */}
+          <div
+            className="fixed inset-0 z-40 bg-black/50"
+            onClick={() => setModal(null)}
+          />
+          {/* Modal */}
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div className="bg-white rounded-xl shadow-xl w-[calc(100%-2rem)] max-w-xl mx-auto max-h-[90vh] my-8 flex flex-col">
+              {/* Header */}
+              <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200">
+                <h2 className="text-base font-semibold text-gray-800">
+                  {modal.type === "transkrip" ? "Transkrip" : "Rangkuman"}
+                </h2>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsModalOpen(true)}
+                    className="px-3 py-1.5 rounded-lg bg-yellow-400 text-gray-900 text-sm font-medium hover:opacity-90"
+                  >
+                    Export PDF
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setModal(null)}
+                    className="px-3 py-1.5 rounded-lg bg-gray-100 text-gray-600 text-sm font-medium hover:bg-gray-200"
+                  >
+                    Tutup
+                  </button>
+                </div>
+              </div>
+              {/* Content */}
+              <div
+                className="overflow-y-auto p-5 flex-1 select-none"
+                onCopy={(e) => e.preventDefault()}
+                onCut={(e) => e.preventDefault()}
+                onContextMenu={(e) => e.preventDefault()}
+              >
+                {modal.type === "transkrip" ? (
+                  <RawResult
+                    label=""
+                    text={modal.job.sourceText!}
+                  />
+                ) : (
+                  <div className="text-left [&_*]:text-left">
+                    <SummaryMarkdownBody
+                      text={modal.job.summaryText!}
+                      className="rounded-lg bg-gray-50"
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+      <PassphraseModal
+        isOpen={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        onConfirm={onPassphraseExportConfirm}
+        isLoading={isLoading}
+      />
     </section>
   );
 }

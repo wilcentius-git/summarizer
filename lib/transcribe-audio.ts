@@ -73,7 +73,7 @@ const WHISPER_RETRY_ATTEMPTS = 3;
 const WHISPER_RETRY_DELAY_MS = 5000;
 /** Extra retries for 429 rate limit (API suggests wait time). */
 const WHISPER_RATE_LIMIT_RETRY_ATTEMPTS = 5;
-/** Delay between transcription chunks to avoid bursting rate limits. */
+/** Default delay between transcription chunks (overridable via {@link TranscribeOptions.chunkDelayMs}). */
 export const TRANSCRIBE_CHUNK_DELAY_MS = 3000;
 
 /** Parse "Please try again in 58.5s" from Groq error body. Returns ms or null. */
@@ -122,13 +122,44 @@ async function transcribeSingleChunk(
   const maxAttempts = Math.max(WHISPER_RETRY_ATTEMPTS, WHISPER_RATE_LIMIT_RETRY_ATTEMPTS);
   for (let attempt = 0; attempt <= maxAttempts; attempt++) {
     try {
-      const res = await fetch(GROQ_TRANSCRIPTION_URL, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-        },
-        body: formData,
-      });
+      const WHISPER_TIMEOUT_MS = 30_000;
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => {
+        controller.abort();
+      }, WHISPER_TIMEOUT_MS);
+
+      let res: Response;
+      try {
+        res = await fetch(GROQ_TRANSCRIPTION_URL, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+          },
+          body: formData,
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+      } catch (fetchErr) {
+        clearTimeout(timeoutId);
+        if (
+          fetchErr instanceof Error &&
+          (fetchErr.name === "AbortError" ||
+            fetchErr.message.includes("aborted"))
+        ) {
+          // Treat timeout as a retryable network error
+          lastError = new Error(`Whisper chunk timed out after ${WHISPER_TIMEOUT_MS}ms`);
+          if (attempt < maxAttempts) {
+            console.log(
+              `>>> [WHISPER] Timeout on attempt ${attempt + 1}. Retrying after ${WHISPER_RETRY_DELAY_MS}ms...`
+            );
+            await sleep(WHISPER_RETRY_DELAY_MS);
+            continue;
+          }
+          throw lastError;
+        }
+        throw fetchErr;
+      }
 
       if (res.ok) {
         return res.text();
@@ -189,6 +220,8 @@ export interface TranscribeOptions {
   startFromChunk?: number;
   /** Pre-filled transcripts from previous run (for resume). */
   initialTranscripts?: string[];
+  /** Pause between Whisper requests; lower = faster, higher TPM burst risk. */
+  chunkDelayMs?: number;
 }
 
 /**
@@ -219,6 +252,8 @@ export async function transcribeWithGroq(
     chunks = [{ buffer }];
   }
 
+  const chunkDelayMs = options?.chunkDelayMs ?? TRANSCRIBE_CHUNK_DELAY_MS;
+
   try {
     const transcripts = [...initialTranscripts];
     const total = chunks.length;
@@ -226,9 +261,12 @@ export async function transcribeWithGroq(
       if (options?.isCancelled && (await options.isCancelled())) {
         throw new TranscribeCancelledError(transcripts);
       }
-      if (i > startFrom) await sleep(TRANSCRIBE_CHUNK_DELAY_MS);
-      options?.onChunkProgress?.(i + 1, total);
       const chunk = chunks[i];
+      console.log(
+        `>>> [WHISPER ${i + 1}/${total}] Starting. Chunk size: ${chunk.buffer.length} bytes`
+      );
+      const whisperStart = Date.now();
+      options?.onChunkProgress?.(i + 1, total);
       const chunkFileName =
         chunks.length > 1 ? `chunk-${i + 1}.mp3` : fileName;
       const text = await transcribeSingleChunk(chunk.buffer, apiKey, {
@@ -236,10 +274,16 @@ export async function transcribeWithGroq(
         fileName: chunkFileName,
         prompt: options?.prompt,
       });
+      console.log(`>>> [WHISPER ${i + 1}/${total}] Done in ${Date.now() - whisperStart}ms`);
+      console.log(`>>> [WHISPER ${i + 1}/${total}] Transcript length: ${text.length} chars`);
       if (text.trim()) {
         transcripts.push(text.trim());
       }
       await options?.onChunkDone?.(i + 1, text.trim(), [...transcripts]);
+      if (i < chunks.length - 1) {
+        console.log(`>>> [WHISPER ${i + 1}/${total}] Sleeping ${chunkDelayMs}ms`);
+        await sleep(chunkDelayMs);
+      }
     }
     return transcripts.join("\n\n");
   } finally {

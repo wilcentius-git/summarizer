@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { FileItem } from "@/app/components/FileUpload";
 import type { SummaryJobItem } from "@/app/hooks/useHistory";
+import { SUMMARIZE_PIPELINE_STANDARD } from "@/lib/summarize-pipeline";
 
 const AUDIO_EXTENSIONS = [".mp3", ".mp4", ".mpeg", ".mpga", ".m4a", ".wav", ".webm", ".flac", ".ogg"];
 
@@ -31,13 +32,17 @@ function estimateSummarizeSeconds(fileSizeBytes: number): number {
   return Math.max(30, Math.ceil(fileSizeBytes / 50000) * 45);
 }
 
-function estimateAudioTranscribeSeconds(durationSeconds: number | undefined, fileSizeBytes: number): number {
+function estimateAudioTranscribeSeconds(
+  durationSeconds: number | undefined,
+  fileSizeBytes: number
+): number {
+  const pipe = SUMMARIZE_PIPELINE_STANDARD;
   const TRANSCRIBE_CHUNK_STEP_SEC = 238;
   const TRANSCRIBE_SEC_PER_CHUNK = 55;
   const CHARS_PER_MIN_AUDIO = 900;
-  const SUMMARIZE_CHUNK_SIZE = 4500;
   const SUMMARIZE_SEC_PER_CHUNK = 42;
   const MERGE_OVERHEAD_SEC = 60;
+  const postTranscribeSec = SUMMARIZE_PIPELINE_STANDARD.postTranscribeCooldownMs / 1000;
 
   let durationMin: number;
   if (durationSeconds != null && durationSeconds > 0) {
@@ -53,10 +58,10 @@ function estimateAudioTranscribeSeconds(durationSeconds: number | undefined, fil
       ? 1
       : Math.ceil(durationSec / TRANSCRIBE_CHUNK_STEP_SEC);
   const transcriptChars = durationMin * CHARS_PER_MIN_AUDIO;
-  const sumChunks = Math.max(1, Math.ceil(transcriptChars / SUMMARIZE_CHUNK_SIZE));
+  const sumChunks = Math.max(1, Math.ceil(transcriptChars / pipe.summarizeChunkSize));
 
   const transTime = transChunks * TRANSCRIBE_SEC_PER_CHUNK;
-  const sumTime = sumChunks * SUMMARIZE_SEC_PER_CHUNK + MERGE_OVERHEAD_SEC;
+  const sumTime = sumChunks * SUMMARIZE_SEC_PER_CHUNK + MERGE_OVERHEAD_SEC + postTranscribeSec;
   return Math.max(60, Math.ceil(transTime + sumTime));
 }
 
@@ -67,6 +72,8 @@ export type SummarizeProgress = {
   message?: string;
   step?: number;
   stepLabel?: string;
+  /** Merge recursion depth (1-based); only set during phase "merge". */
+  mergeRound?: number;
 };
 
 export function useSummarize(
@@ -84,7 +91,10 @@ export function useSummarize(
   const summarizeAbortRef = useRef<AbortController | null>(null);
 
   const [resumeLoading, setResumeLoading] = useState<string | null>(null);
-  const [resumeProgress, setResumeProgress] = useState<{ message?: string } | null>(null);
+  const [resumeProgress, setResumeProgress] = useState<{
+    message?: string;
+    mergeRound?: number;
+  } | null>(null);
   const resumeAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
@@ -134,10 +144,6 @@ export function useSummarize(
   const handleSummarize = useCallback(
     async (item: FileItem, glossary?: string) => {
       const key = groqApiKey.trim();
-      if (!key) {
-        setError("Masukkan Groq API key terlebih dahulu. Dapatkan di console.groq.com");
-        return;
-      }
       setError(null);
       setCurrentSummarizeJobId(null);
       setLiveSourceText("");
@@ -155,7 +161,9 @@ export function useSummarize(
       try {
         const formData = new FormData();
         formData.append("file", item.file);
-        formData.append("groqApiKey", key);
+        if (key) {
+          formData.append("groqApiKey", key);
+        }
         if (glossary?.trim()) {
           formData.append("glossary", glossary.trim());
         }
@@ -194,6 +202,7 @@ export function useSummarize(
                 message?: string;
                 step?: number;
                 stepLabel?: string;
+                mergeRound?: number;
               };
               if (data.type === "job" && data.jobId) {
                 setCurrentSummarizeJobId(data.jobId);
@@ -205,6 +214,7 @@ export function useSummarize(
                   message: data.message,
                   step: data.step,
                   stepLabel: data.stepLabel,
+                  mergeRound: data.mergeRound,
                 });
               } else if (data.type === "sourceText") {
                 setLiveSourceText(sanitizeSummaryText(data.text ?? ""));
@@ -281,10 +291,6 @@ export function useSummarize(
   const handleResumeJob = useCallback(
     async (job: SummaryJobItem) => {
       const key = groqApiKey.trim();
-      if (!key) {
-        setError("Masukkan Groq API key terlebih dahulu. Dapatkan di console.groq.com");
-        return;
-      }
       if (!job.isResumable) return;
       setError(null);
       setResumeLoading(job.id);
@@ -297,7 +303,7 @@ export function useSummarize(
         const res = await fetch(`/api/summary-jobs/${job.id}/resume`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ groqApiKey: key }),
+          body: JSON.stringify(key ? { groqApiKey: key } : {}),
           signal: controller.signal,
           credentials: "include",
         });
@@ -337,6 +343,7 @@ export function useSummarize(
                 total?: number;
                 message?: string;
                 text?: string;
+                mergeRound?: number;
               };
               if (data.type === "progress") {
                 const msg =
@@ -346,7 +353,10 @@ export function useSummarize(
                     : data.phase === "merge"
                       ? "Menggabungkan rangkuman…"
                       : "Memproses…");
-                setResumeProgress({ message: msg });
+                setResumeProgress({
+                  message: msg,
+                  mergeRound: data.mergeRound,
+                });
               } else if (data.type === "summary") {
                 void fetchHistory().then(() => {
                   onSuccessfulCompletion?.();

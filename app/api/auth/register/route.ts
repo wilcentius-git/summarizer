@@ -1,55 +1,33 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { setAuthTokenCookie } from "@/lib/auth-cookie";
-import { hashPassword, createToken } from "@/lib/auth";
-import { checkRateLimit } from "@/lib/rate-limit";
-import { registerSchema } from "@/lib/validations";
 
-export async function POST(request: Request) {
-  const rateLimited = checkRateLimit(request);
-  if (rateLimited) return rateLimited;
+function forbidden() {
+  return NextResponse.json({ error: "Registration is disabled" }, { status: 403 });
+}
 
-  try {
-    const body = await request.json();
-    const parsed = registerSchema.safeParse(body);
+export function GET() {
+  return forbidden();
+}
 
-    if (!parsed.success) {
-      const firstError = parsed.error.issues[0]?.message ?? "Invalid input";
-      return NextResponse.json({ error: firstError }, { status: 400 });
-    }
+export function POST() {
+  return forbidden();
+}
 
-    const { email, password } = parsed.data;
+export function PUT() {
+  return forbidden();
+}
 
-    const existing = await prisma.user.findUnique({
-      where: { email },
-    });
-    if (existing) {
-      return NextResponse.json(
-        { error: "Email already registered" },
-        { status: 409 }
-      );
-    }
+export function PATCH() {
+  return forbidden();
+}
 
-    const passwordHash = await hashPassword(password);
-    const user = await prisma.user.create({
-      data: {
-        email,
-        passwordHash,
-      },
-    });
+export function DELETE() {
+  return forbidden();
+}
 
-    const token = await createToken({ userId: user.id, email: user.email });
+export function HEAD() {
+  return forbidden();
+}
 
-    const response = NextResponse.json({
-      user: { id: user.id, email: user.email, createdAt: user.createdAt },
-    });
-    setAuthTokenCookie(response, token);
-    return response;
-  } catch (err) {
-    console.error("Register error:", err);
-    return NextResponse.json(
-      { error: "Registration failed" },
-      { status: 500 }
-    );
-  }
+export function OPTIONS() {
+  return forbidden();
 }

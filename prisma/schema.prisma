@@ -8,8 +8,12 @@ datasource db {
 }
 
 model User {
-  id           String       @id @default(cuid())
+  /** NIP from Simpeg (same value as JWT `userId`). */
+  id           String       @id
+  /** Kept for API responses; same as `id` (NIP). */
   email        String       @unique
+  /** Display name from Simpeg (or admin); shown in UI instead of NIP when set. */
+  name         String?
   passwordHash String       @map("password_hash")
   createdAt    DateTime     @default(now()) @map("created_at")
   summaryJobs  SummaryJob[]
@@ -33,10 +37,15 @@ model SummaryJob {
   errorMessage          String?   @map("error_message")
   retryAfter            DateTime? @map("retry_after")
   extractedTextForRetry String?   @map("extracted_text_for_retry")
-  jobRetryContext       String?   @map("job_retry_context") // JSON: { flow, leaderName?, leaderPosition? }
+  jobRetryContext       String?   @map("job_retry_context") // JSON: { isAudio?, summarizeChunkSize? }
   processedTranscribeChunks Int   @default(0) @map("processed_transcribe_chunks")
   partialTranscript     String?   @map("partial_transcript") // JSON array of transcript chunks
   audioPath             String?   @map("audio_path") // Path to stored audio for resume-from-transcription
+  totalDurationMs       Int?      @map("total_duration_ms")
+  transcribeDurationMs  Int?      @map("transcribe_duration_ms")
+  summarizeDurationMs   Int?      @map("summarize_duration_ms")
+  mergeDurationMs       Int?      @map("merge_duration_ms")
+  completedAt           DateTime? @map("completed_at")
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 

@@ -18,6 +18,11 @@ export type SummaryJobItem = {
   isResumable?: boolean;
   totalChunks?: number | null;
   processedChunks?: number;
+  totalDurationMs?: number | null;
+  transcribeDurationMs?: number | null;
+  summarizeDurationMs?: number | null;
+  mergeDurationMs?: number | null;
+  completedAt?: string | null;
 };
 
 export function useHistory(user: { id: string } | null) {

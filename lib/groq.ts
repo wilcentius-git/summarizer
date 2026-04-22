@@ -4,16 +4,29 @@
  */
 
 import type { PdfPageImage } from "@/lib/pdf-to-images";
+import {
+  SUMMARIZE_PIPELINE_STANDARD,
+  type SummarizePipelineConfig,
+} from "@/lib/summarize-pipeline";
+
+export {
+  SUMMARIZE_PIPELINE_STANDARD,
+  type SummarizePipelineConfig,
+} from "@/lib/summarize-pipeline";
 
 export const MAX_FILE_SIZE_BYTES = 500 * 1024 * 1024; // 500 MB
-/** Chunk size for summarization (~1500 tokens). Keeps requests under Groq free tier TPM. */
-export const SUMMARIZE_CHUNK_SIZE = 4500;
-/** Delay between chunk requests to avoid Groq TPM rate limit (429). */
-export const SUMMARIZE_CHUNK_DELAY_MS = 6000;
-/** Single merge when combined summaries fit under this character limit. */
-export const SUMMARIZE_MERGE_THRESHOLD = 12000;
-/** Pause before merge to let rate limits recover after summarization phase. */
-export const SUMMARIZE_MERGE_PRE_DELAY_MS = 8000;
+
+/** @deprecated Prefer {@link SUMMARIZE_PIPELINE_STANDARD} fields — kept for worker / imports. */
+export const SUMMARIZE_CHUNK_SIZE = SUMMARIZE_PIPELINE_STANDARD.summarizeChunkSize;
+export const SUMMARIZE_CHUNK_DELAY_MS = SUMMARIZE_PIPELINE_STANDARD.summarizeChunkDelayMs;
+export const SUMMARIZE_MERGE_CHUNK_SIZE = SUMMARIZE_PIPELINE_STANDARD.mergeChunkSize;
+export const SUMMARIZE_MERGE_CHUNK_DELAY_MS = SUMMARIZE_PIPELINE_STANDARD.mergeChunkDelayMs;
+export const SUMMARIZE_MERGE_THRESHOLD = SUMMARIZE_PIPELINE_STANDARD.mergeThreshold;
+export const SUMMARIZE_MERGE_PRE_DELAY_MS = SUMMARIZE_PIPELINE_STANDARD.mergePreDelayMs;
+export const SUMMARIZE_MERGE_RATE_LIMIT_BACKOFF_MS =
+  SUMMARIZE_PIPELINE_STANDARD.mergeRateLimitBackoffMs;
+export const SUMMARIZE_MERGE_RATE_LIMIT_MAX_ATTEMPTS =
+  SUMMARIZE_PIPELINE_STANDARD.mergeRateLimitMaxAttempts;
 export const GROQ_IMAGES_PER_REQUEST = 1;
 
 /**
@@ -237,14 +250,26 @@ ATURAN UMUM:
 - Tanpa pembukaan lain, langsung rangkuman saja.
 - Pastikan rangkuman selesai lengkap; jangan potong di tengah kalimat.`;
 
-const SUMMARIZE_CHUNK_PROMPT = `Rangkum bagian berikut secara ringkas dalam Bahasa Indonesia.
-- Fokus pada poin-poin penting dan UNIK. Poin yang sama hanya disebut SATU KALI. Gabungkan ide mirip; jangan ulangi di paragraf berbeda.
-- Jika bagian ini dari notula/pertemuan (ada peserta, jalannya rapat, diskusi): PERTAHANKAN nama orang, organisasi/unit, detail teknis. Gunakan format: daftar bernomor (1., 2.) dan sub-list huruf (a., b., c.). Bold (**) untuk nama orang, organisasi, istilah teknis.
-- Jika bagian ini dari buku/artikel/podcast: format 3 bagian—**Ringkasan Eksekutif** (MAKSIMAL 40 kata, ikhtisar tingkat tinggi), **Rangkuman** (daftar bernomor dengan detail konkret: nama, angka, contoh. JANGAN gunakan sub-poin—tulis detail sebagai kalimat lanjutan dalam paragraf bernomor yang sama. Sertakan semua poin penting; buang yang generik atau redundan.), **Insight tambahan** (MAKSIMAL 40 kata, takeaway non-obvious DARI narasumber/penulis—bukan nasihat umum). Beri baris kosong antara judul dan isi. Ringkasan Eksekutif TIDAK BOLEH mengulang kalimat dari Rangkuman.
-- SPESIFISITAS: Sertakan detail konkret (siapa, apa, contoh nyata). Hindari pernyataan generik yang berlaku untuk topik apa saja.
-- Hindari kata "juga" di awal atau akhir kalimat. Variasikan struktur kalimat.
-- KOREKSI TRANSKRIPSI: Perbaiki kesalahan umum dari speech-to-text, mis. "ekspetasi" → "ekspektasi", "menafigasi" → "menavigasi", "infestasi" → "investasi".
-- Tanpa pembukaan, langsung rangkuman saja. Pastikan kalimat terakhir selesai lengkap.`;
+const SUMMARIZE_CHUNK_MEETING_PROMPT = `Anda adalah asisten notulen rapat pemerintah yang profesional.
+Ekstrak poin-poin penting dari bagian transkrip rapat berikut.
+
+ATURAN:
+- Gunakan daftar bernomor (1., 2.) dan sub-list huruf (a., b., c.)
+- Bold (**) untuk nama orang, organisasi, dan istilah teknis
+- PERTAHANKAN nama orang, organisasi/unit, dan detail teknis
+- Fokus pada poin UNIK. Gabungkan ide mirip; jangan ulangi
+- SPESIFISITAS: sertakan detail konkret (siapa, apa, contoh nyata)
+- KOREKSI TRANSKRIPSI: perbaiki kesalahan speech-to-text
+  mis. "ekspetasi"→"ekspektasi", "infestasi"→"investasi"
+- Hindari kata "juga" di awal atau akhir kalimat
+- Tanpa pembukaan, langsung poin saja
+- Pastikan kalimat terakhir selesai lengkap`;
+
+const SUMMARIZE_CHUNK_DOC_PROMPT = `Anda asisten notulen rapat pemerintah yang profesional. Ekstrak poin penting dari bagian transkrip berikut: maksimal 5 poin, tiap poin maksimal 30 kata. Bahasa Indonesia formal. Tanpa kesimpulan atau kalimat penutup.
+
+Format output:
+- [poin penting]
+- [poin penting]`;
 
 const SUMMARIZE_MERGE_PROMPT = `PENTING: Ringkasan Eksekutif dan Insight tambahan MAKSIMAL 40 kata masing-masing. JANGAN lebih.
 
@@ -268,43 +293,56 @@ ATURAN:
 - Pastikan rangkuman selesai LENGKAP; jangan potong di tengah kalimat atau paragraf.
 - Tanpa pembukaan lain, langsung rangkuman saja. Output akhir: tepat satu blok **Ringkasan Eksekutif**, satu blok **Rangkuman**, satu blok **Insight tambahan**. Tidak boleh ada pengulangan struktur ini.`;
 
+const MERGE_PROMPT = SUMMARIZE_MERGE_PROMPT;
+
+const MERGE_INTERMEDIATE_PROMPT = `Anda adalah asisten notulen. Tugas Anda adalah mengompres poin-poin berikut menjadi daftar ringkas.
+
+ATURAN:
+- Output HANYA daftar bernomor (1., 2., 3., ...)
+- Setiap poin maksimal 20 kata
+- PERTAHANKAN poin yang mengandung minimal satu dari:
+  nama spesifik (orang, perusahaan, produk, teknologi), angka atau statistik, contoh konkret, atau klaim langsung dari narasumber
+- BUANG poin yang bersifat generik dan bisa berlaku untuk konteks apa saja tanpa nama atau detail spesifik
+  contoh poin yang DIBUANG: "kerja keras adalah kunci sukses", "teknologi terus berkembang", "komunikasi itu penting"
+  contoh poin yang DIPERTAHANKAN: "Elon Musk menyatakan Starship dapat mengurangi biaya orbit menjadi $100/kg", "DeepSeek mengurangi biaya komputasi AI hingga 40x"
+- Gabungkan poin yang memiliki subjek dan ide yang sama menjadi satu
+- Tidak ada batas jumlah poin — pertahankan semua yang memenuhi kriteria di atas
+- Tanpa heading, tanpa pembukaan, tanpa penutup
+- Langsung daftar saja`;
+
 export function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-export type MergeProgress = (current: number, total: number) => void;
+/**
+ * Sleep between chunk summarize calls using Groq rate-limit headers (TPM pacing).
+ * Call after each chunk response except the last (pass i and total; no-op when i >= total - 1).
+ */
+export async function sleepChunkPacingFromGroqHeaders(
+  responseHeaders: Headers,
+  i: number,
+  total: number
+): Promise<void> {
+  if (i >= total - 1) return;
+  const remainingTokens = parseInt(
+    responseHeaders.get("x-ratelimit-remaining-tokens") ?? "6000",
+    10
+  );
+  const resetTokensMs =
+    parseFloat(responseHeaders.get("x-ratelimit-reset-tokens") ?? "60") * 1000;
 
-export async function mergeSummaries(
-  summaries: string[],
-  apiKey: string,
-  optionsOrProgress?: MergeProgress | { glossary?: string; onProgress?: MergeProgress },
-  legacyOnProgress?: MergeProgress
-): Promise<string> {
-  let glossary: string | undefined;
-  let onProgress: MergeProgress | undefined;
-  if (typeof optionsOrProgress === "function") {
-    onProgress = optionsOrProgress;
-  } else if (optionsOrProgress) {
-    glossary = optionsOrProgress.glossary;
-    onProgress = optionsOrProgress.onProgress;
+  if (remainingTokens < 1500) {
+    const waitMs = resetTokensMs + 500;
+    console.log(
+      `>>> [CHUNK ${i + 1}/${total}] TPM low (${remainingTokens} remaining). Waiting ${waitMs}ms`
+    );
+    await sleep(waitMs);
+  } else {
+    await sleep(300);
   }
-  if (legacyOnProgress) onProgress = legacyOnProgress;
-
-  const combined = summaries.join("\n\n");
-  if (combined.length <= SUMMARIZE_MERGE_THRESHOLD) {
-    return summarizeWithGroq(combined, apiKey, { isMerge: true, glossary });
-  }
-  const chunks = splitIntoChunks(combined, SUMMARIZE_CHUNK_SIZE);
-  const merged: string[] = [];
-  for (let i = 0; i < chunks.length; i++) {
-    merged.push(await summarizeWithGroq(chunks[i], apiKey, { isMerge: true, glossary }));
-    onProgress?.(i + 1, chunks.length);
-    if (i < chunks.length - 1) {
-      await sleep(SUMMARIZE_CHUNK_DELAY_MS);
-    }
-  }
-  return mergeSummaries(merged, apiKey, { glossary, onProgress });
 }
+
+export type MergeProgress = (current: number, total: number) => void;
 
 /** Error thrown when Groq returns 429 after all retries. Job should be set to waiting_rate_limit. */
 export class GroqRateLimitError extends Error {
@@ -320,6 +358,152 @@ export class GroqRateLimitError extends Error {
 /** Check if an error is a Groq rate limit error (429). */
 export function isGroqRateLimitError(err: unknown): err is GroqRateLimitError {
   return err instanceof GroqRateLimitError;
+}
+
+/** Groq merge with labeled bagian sections; merge prompt and max_tokens 600 via summarizeWithGroq. */
+async function mergeSummariesOnce(
+  summaries: string[],
+  apiKey: string,
+  glossary: string | undefined,
+  onProgress: MergeProgress | undefined,
+  onBatchComplete?: (batchResults: string[]) => Promise<void>
+): Promise<string> {
+  const pipeline = SUMMARIZE_PIPELINE_STANDARD;
+    const MERGE_PROMPT_OVERHEAD_TOKENS = 500;
+    const SAFE_TOKEN_LIMIT = 2800;
+    const BATCH_CHAR_LIMIT = 5000; // ~3000 tokens per batch at 1 token per 3 chars
+
+    const parts = summaries.map((s) => s.trim()).filter(Boolean);
+    if (parts.length === 0) return "";
+
+    const combined = parts
+      .map((s, i) => `[Bagian ${i + 1}]\n${s}`)
+      .join("\n\n");
+
+    // Use /3 not /4 — Bahasa Indonesia tokenizes less efficiently than English
+    const estimatedTokens =
+      Math.round(combined.length / 3) + MERGE_PROMPT_OVERHEAD_TOKENS;
+
+    console.log(
+      `>>> [MERGE] Input: ${combined.length} chars (~${estimatedTokens} tokens estimated)`
+    );
+
+    if (estimatedTokens <= SAFE_TOKEN_LIMIT) {
+      console.log(`>>> [MERGE] Single call (final).`);
+      onProgress?.(1, 1);
+      const mergeStart = Date.now();
+      const result = await summarizeWithGroq(combined, apiKey, {
+        systemPrompt: MERGE_PROMPT,
+        maxTokens: 1500,
+        glossary,
+        pipeline,
+      });
+      console.log(
+        `>>> [MERGE] Done in ${Date.now() - mergeStart}ms. Output: ${result.length} chars`
+      );
+      return result;
+    }
+
+    // Too large — split into character-limited batches
+    const batches: string[][] = [];
+    let currentBatch: string[] = [];
+    let currentLength = 0;
+
+    for (const summary of parts) {
+      if (currentLength + summary.length > BATCH_CHAR_LIMIT && currentBatch.length > 0) {
+        batches.push(currentBatch);
+        currentBatch = [];
+        currentLength = 0;
+      }
+      currentBatch.push(summary);
+      currentLength += summary.length;
+    }
+    if (currentBatch.length > 0) batches.push(currentBatch);
+
+    console.log(`>>> [MERGE] Too large. Splitting into ${batches.length} batches.`);
+
+    const batchResults: string[] = [];
+    for (let i = 0; i < batches.length; i++) {
+      const batchInput = batches[i]
+        .map((s, j) => `[Bagian ${j + 1}]\n${s}`)
+        .join("\n\n");
+
+      onProgress?.(i + 1, batches.length + 1);
+      console.log(
+        `>>> [MERGE BATCH ${i + 1}/${batches.length}] Input: ${batchInput.length} chars`
+      );
+      const mergeStart = Date.now();
+
+      const result = await summarizeWithGroq(batchInput, apiKey, {
+        systemPrompt: MERGE_INTERMEDIATE_PROMPT,
+        maxTokens: 350,
+        glossary,
+        pipeline,
+      });
+
+      console.log(
+        `>>> [MERGE BATCH ${i + 1}/${batches.length}] Done in ${Date.now() - mergeStart}ms. Output: ${result.length} chars`
+      );
+      batchResults.push(result);
+
+      // Checkpoint after each batch
+      if (onBatchComplete) {
+        await onBatchComplete([...batchResults]);
+      }
+
+      if (i < batches.length - 1) {
+        console.log(
+          `>>> [MERGE BATCH ${i + 1}/${batches.length}] Waiting 62000ms for TPM reset`
+        );
+        await sleep(62000);
+      }
+    }
+
+    const totalBatchOutputChars = batchResults.reduce((sum, r) => sum + r.length, 0);
+    console.log(
+      `>>> [MERGE FINAL] Reducing ${batchResults.length} batch results. Total chars: ${totalBatchOutputChars}`
+    );
+    onProgress?.(batches.length + 1, batches.length + 1);
+    await sleep(62000);
+    // Inner reduce rounds: no onBatchComplete — checkpoints only for outermost merge
+    return mergeSummariesOnce(batchResults, apiKey, glossary, onProgress);
+}
+
+export interface MergeSummariesOptions {
+  glossary?: string;
+  onProgress?: MergeProgress;
+  onBatchComplete?: (batchResults: string[]) => Promise<void>;
+}
+
+export async function mergeSummaries(
+  summaries: string[],
+  apiKey: string,
+  optionsOrProgress?: MergeProgress | MergeSummariesOptions,
+  legacyOnProgress?: MergeProgress
+): Promise<string> {
+  const options =
+    optionsOrProgress && typeof optionsOrProgress === "object"
+      ? (optionsOrProgress as MergeSummariesOptions)
+      : undefined;
+
+  let glossary: string | undefined;
+  let onProgress: MergeProgress | undefined;
+
+  if (typeof optionsOrProgress === "function") {
+    onProgress = optionsOrProgress;
+  } else if (options) {
+    glossary = options.glossary;
+    onProgress = options.onProgress;
+  }
+  if (legacyOnProgress) onProgress = legacyOnProgress;
+
+  return mergeSummariesOnce(
+    summaries,
+    apiKey,
+    glossary,
+    onProgress,
+    options?.onBatchComplete
+  );
 }
 
 /** User-friendly message for Groq 412/413 (quota) and 429 (rate limit). */
@@ -367,7 +551,7 @@ async function callGroqApi(
   messages: Array<{ role: string; content: string }>,
   apiKey: string,
   options?: { model?: string; maxTokens?: number; temperature?: number }
-): Promise<string> {
+): Promise<{ content: string; headers: Headers }> {
   const model = options?.model ?? GROQ_MODEL;
   const maxTokens = options?.maxTokens ?? 4096;
   const temperature = options?.temperature ?? 0.3;
@@ -394,7 +578,7 @@ async function callGroqApi(
         choices?: Array<{ message?: { content?: string } }>;
       };
       const raw = json.choices?.[0]?.message?.content?.trim() ?? "";
-      return fixCommonTypos(raw);
+      return { content: fixCommonTypos(raw), headers: res.headers };
     }
 
     const errBody = await res.text();
@@ -423,36 +607,115 @@ async function callGroqApi(
   throw lastError ?? new Error("Summarization failed.");
 }
 
+export type SummarizeWithGroqOptions = {
+  isChunk?: boolean;
+  isMerge?: boolean;
+  glossary?: string;
+  isAudio?: boolean;
+  returnHeaders?: boolean;
+  /** Overrides default system prompt from isChunk/isMerge flags; glossary is still appended. */
+  systemPrompt?: string;
+  /** Explicit max_tokens for the completion. */
+  maxTokens?: number;
+  /** When set with merge-style calls, applies merge rate-limit retries from pipeline config. */
+  pipeline?: SummarizePipelineConfig;
+};
+
 export async function summarizeWithGroq(
   content: string,
   apiKey: string,
-  options?: { isChunk?: boolean; isMerge?: boolean; glossary?: string }
-): Promise<string> {
-  const basePrompt = options?.isMerge
-    ? SUMMARIZE_MERGE_PROMPT
-    : options?.isChunk
-      ? SUMMARIZE_CHUNK_PROMPT
-      : SUMMARIZE_PROMPT;
+  options: SummarizeWithGroqOptions & { returnHeaders: true }
+): Promise<{ content: string; headers: Headers }>;
+export async function summarizeWithGroq(
+  content: string,
+  apiKey: string,
+  options?: SummarizeWithGroqOptions
+): Promise<string>;
+export async function summarizeWithGroq(
+  content: string,
+  apiKey: string,
+  options?: SummarizeWithGroqOptions
+): Promise<string | { content: string; headers: Headers }> {
+  const isAudio = options?.isAudio === true;
+  const explicitSystem = options?.systemPrompt;
+
+  const basePrompt = explicitSystem
+    ? explicitSystem
+    : options?.isMerge
+      ? SUMMARIZE_MERGE_PROMPT
+      : options?.isChunk
+        ? isAudio
+          ? SUMMARIZE_CHUNK_MEETING_PROMPT
+          : SUMMARIZE_CHUNK_DOC_PROMPT
+        : SUMMARIZE_PROMPT;
 
   const glossaryNote = options?.glossary
     ? `\n\nISTILAH TEKNIS KHUSUS (pertahankan ejaan persis seperti ini, jangan ubah atau terjemahkan): ${options.glossary}`
     : "";
 
-  const systemPrompt = basePrompt + glossaryNote;
+  const fullSystemPrompt = basePrompt + glossaryNote;
 
-  const userLabel = options?.isMerge
-    ? "Rangkuman per bagian:\n\n"
-    : options?.isChunk
-      ? "Bagian:\n\n"
-      : "Dokumen:\n\n";
+  const userLabel =
+    explicitSystem || options?.isMerge
+      ? "Rangkuman per bagian:\n\n"
+      : options?.isChunk
+        ? "Bagian:\n\n"
+        : "Dokumen:\n\n";
 
-  return callGroqApi(
-    [
-      { role: "system", content: systemPrompt },
-      { role: "user", content: userLabel + content },
-    ],
-    apiKey
-  );
+  const resolvedMaxTokens =
+    options?.maxTokens !== undefined
+      ? options.maxTokens
+      : options?.isMerge
+        ? 600
+        : options?.isChunk
+          ? isAudio
+            ? 500
+            : 250
+          : undefined;
+
+  const callOpts =
+    resolvedMaxTokens !== undefined ? { maxTokens: resolvedMaxTokens } : undefined;
+
+  const execute = () =>
+    callGroqApi(
+      [
+        { role: "system", content: fullSystemPrompt },
+        { role: "user", content: userLabel + content },
+      ],
+      apiKey,
+      callOpts
+    );
+
+  const useMergeResilience =
+    Boolean(options?.pipeline) &&
+    (Boolean(explicitSystem) || options?.isMerge === true);
+
+  if (useMergeResilience && options?.pipeline) {
+    const pipeline = options.pipeline;
+    let lastErr: unknown;
+    for (let attempt = 0; attempt < pipeline.mergeRateLimitMaxAttempts; attempt++) {
+      try {
+        const mergeResult = await execute();
+        if (options?.returnHeaders === true) {
+          return mergeResult;
+        }
+        return mergeResult.content;
+      } catch (e) {
+        lastErr = e;
+        if (!isGroqRateLimitError(e) || attempt >= pipeline.mergeRateLimitMaxAttempts - 1) {
+          throw e;
+        }
+        await sleep(pipeline.mergeRateLimitBackoffMs);
+      }
+    }
+    throw lastErr ?? new Error("Summarization failed.");
+  }
+
+  const result = await execute();
+  if (options?.returnHeaders === true) {
+    return result;
+  }
+  return result.content;
 }
 
 export async function refineWithGroq(
@@ -460,16 +723,18 @@ export async function refineWithGroq(
   newChunk: string,
   apiKey: string
 ): Promise<string> {
-  return callGroqApi(
-    [
-      { role: "system", content: REFINE_SYSTEM_PROMPT },
-      {
-        role: "user",
-        content: `Rangkuman saat ini:\n\n${currentSummary}\n\n---\n\nBagian baru dari dokumen:\n\n${newChunk}`,
-      },
-    ],
-    apiKey
-  );
+  return (
+    await callGroqApi(
+      [
+        { role: "system", content: REFINE_SYSTEM_PROMPT },
+        {
+          role: "user",
+          content: `Rangkuman saat ini:\n\n${currentSummary}\n\n---\n\nBagian baru dari dokumen:\n\n${newChunk}`,
+        },
+      ],
+      apiKey
+    )
+  ).content;
 }
 
 /**

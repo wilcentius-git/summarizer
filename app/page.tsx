@@ -61,7 +61,9 @@ export default function Home() {
       <div className="w-full max-w-2xl bg-white rounded-lg shadow-lg px-4 sm:px-8 pt-4 pb-10 mx-auto overflow-x-hidden text-center">
         {user && (
           <div className="flex items-center justify-between gap-3 mb-6">
-            <span className="text-base text-kemenkum-blue font-medium truncate">{user.email}</span>
+            <span className="text-base text-kemenkum-blue font-medium truncate">
+              {user.name?.trim() || user.email}
+            </span>
             <button
               type="button"
               onClick={logout}
@@ -94,30 +96,39 @@ export default function Home() {
           Unggah dokumen (PDF, DOCX, TXT, RTF, ODT, SRT) atau audio (MP3, WAV, M4A) untuk diringkas.
         </p>
 
-        <div className="w-full max-w-md mx-auto mb-6 text-left">
-          <label htmlFor="groq-api-key" className="block text-sm font-medium text-gray-700 mb-1">
-            Groq API Key <span className="text-gray-500">(disimpan selama sesi)</span>
-          </label>
-          <input
-            id="groq-api-key"
-            type="password"
-            value={groqApiKey}
-            onChange={(e) => setGroqApiKey(e.target.value)}
-            placeholder="gsk_..."
-            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-gray-900 placeholder-gray-400 focus:border-kemenkum-blue focus:outline-none focus:ring-1 focus:ring-kemenkum-blue"
-          />
-          <p className="mt-1 text-xs text-gray-500">
-            Dapatkan kunci gratis di{" "}
-            <a
-              href="https://console.groq.com"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-kemenkum-blue hover:underline"
-            >
-              console.groq.com
-            </a>
-          </p>
-        </div>
+        <details className="w-full max-w-md mx-auto mb-6 group">
+          <summary className="cursor-pointer list-none text-sm text-gray-600 hover:text-kemenkum-blue [&::-webkit-details-marker]:hidden flex w-full items-center justify-center gap-2 text-center">
+            <span className="inline-block transition-transform group-open:rotate-90 text-gray-400">▸</span>
+            kunci groq sendiri(opsional)
+          </summary>
+          <div className="mt-3 pt-2 border-t border-gray-100 text-left">
+            <p className="text-xs text-gray-500 mb-2">
+              Bawa sendiri hanya jika server belum mengatur <code className="text-gray-600">GROQ_API_KEY</code>.
+              Kunci gratis di{" "}
+              <a
+                href="https://console.groq.com"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-kemenkum-blue hover:underline"
+              >
+                console.groq.com
+              </a>
+              {" "}
+              (disimpan selama sesi peramban).
+            </p>
+            <label htmlFor="groq-api-key" className="block text-sm font-medium text-gray-700 mb-1">
+              Groq API Key
+            </label>
+            <input
+              id="groq-api-key"
+              type="password"
+              value={groqApiKey}
+              onChange={(e) => setGroqApiKey(e.target.value)}
+              placeholder="Kosongkan jika memakai kunci server"
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-gray-900 placeholder-gray-400 focus:border-kemenkum-blue focus:outline-none focus:ring-1 focus:ring-kemenkum-blue"
+            />
+          </div>
+        </details>
 
         <div
           onDragEnter={handleDrag}

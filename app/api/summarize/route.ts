@@ -18,11 +18,10 @@ import {
   MAX_FILE_SIZE_BYTES,
   mergeSummaries,
   sleep,
-  SUMMARIZE_CHUNK_DELAY_MS,
-  SUMMARIZE_CHUNK_SIZE,
-  SUMMARIZE_MERGE_PRE_DELAY_MS,
+  sleepChunkPacingFromGroqHeaders,
   splitIntoChunks,
   summarizeWithGroq,
+  SUMMARIZE_PIPELINE_STANDARD,
 } from "@/lib/groq";
 import { truncateSummarySections } from "@/lib/summary-format";
 import {
@@ -34,6 +33,7 @@ import {
   transcribeWithGroq,
 } from "@/lib/transcribe-audio";
 import { deleteAudio, saveAudio } from "@/lib/audio-storage";
+import { resolveGroqApiKey } from "@/lib/resolve-groq-api-key";
 
 function sendStreamLine(controller: ReadableStreamDefaultController<Uint8Array>, obj: object) {
   const encoder = new TextEncoder();
@@ -61,13 +61,17 @@ export async function POST(request: NextRequest) {
   } catch {
     return NextResponse.json({ error: "Invalid form data." }, { status: 400 });
   }
-  const apiKey = (formData.get("groqApiKey") as string)?.trim();
+  const apiKey = resolveGroqApiKey(formData.get("groqApiKey") as string | null | undefined);
   const glossary = ((formData.get("glossary") as string | null) ?? "").trim();
+  const pipeline = SUMMARIZE_PIPELINE_STANDARD;
   const file = formData.get("file");
 
   if (!apiKey) {
     return NextResponse.json(
-      { error: "Groq API key is required. Get one at https://console.groq.com" },
+      {
+        error:
+          "Groq API key is required. Set GROQ_API_KEY in .env.local on the server, or enter your key under kunci groq sendiri (opsional).",
+      },
       { status: 400 }
     );
   }
@@ -121,6 +125,14 @@ export async function POST(request: NextRequest) {
 
   const stream = new ReadableStream({
     async start(controller) {
+      const pipelineJobStart = Date.now();
+      let transcribeStartMs: number | undefined;
+      let transcribeEndMs: number | undefined;
+      let summarizeStartMs: number | undefined;
+      let summarizeEndMs: number | undefined;
+      let mergeStartMs: number | undefined;
+      let mergeEndMs: number | undefined;
+
       const send = (obj: object) => {
         try {
           sendStreamLine(controller, obj);
@@ -143,10 +155,15 @@ export async function POST(request: NextRequest) {
         jobRetryContext?: string | null;
         totalChunks?: number;
         processedChunks?: number;
-        partialSummary?: string;
+        partialSummary?: string | null;
         processedTranscribeChunks?: number;
         partialTranscript?: string | null;
         audioPath?: string;
+        totalDurationMs?: number;
+        transcribeDurationMs?: number;
+        summarizeDurationMs?: number;
+        mergeDurationMs?: number;
+        completedAt?: Date;
       }) => {
         try {
           await prisma.summaryJob.update({
@@ -192,10 +209,12 @@ export async function POST(request: NextRequest) {
             stepLabel: "Transkripsi",
           });
           try {
+            transcribeStartMs = Date.now();
             text = await transcribeWithGroq(buffer, apiKey, {
               language: "id",
               fileName,
               prompt: glossary || undefined,
+              chunkDelayMs: pipeline.transcribeChunkDelayMs,
               isCancelled: () => isJobCancelled(job.id),
               onChunkProgress: (current, total) => {
                 send({
@@ -218,6 +237,10 @@ export async function POST(request: NextRequest) {
                 });
               },
             });
+            transcribeEndMs = Date.now();
+            console.log(
+              `>>> [TIMING] Transcription done in ${transcribeEndMs - transcribeStartMs!}ms`
+            );
           } catch (transcribeErr) {
             if (transcribeErr instanceof TranscribeCancelledError) {
               await updateJob({ status: "cancelled" });
@@ -253,7 +276,10 @@ export async function POST(request: NextRequest) {
 
         await updateJob({
           extractedTextForRetry: text,
-          jobRetryContext: JSON.stringify({ flow: "summarize", isAudio }),
+          jobRetryContext: JSON.stringify({
+            isAudio,
+            summarizeChunkSize: pipeline.summarizeChunkSize,
+          }),
         });
         send({ type: "sourceText", text });
 
@@ -269,11 +295,11 @@ export async function POST(request: NextRequest) {
             step: 2,
             stepLabel: "Menunggu",
           });
-          await sleep(30_000);
+          await sleep(pipeline.postTranscribeCooldownMs);
         }
 
         try {
-          if (text.length <= SUMMARIZE_CHUNK_SIZE) {
+          if (text.length <= pipeline.summarizeChunkSize) {
             await updateJob({ progressPercentage: 60 });
             send({
               type: "progress",
@@ -284,10 +310,12 @@ export async function POST(request: NextRequest) {
               step: isAudio ? 2 : 1,
               stepLabel: "Rangkuman",
             });
+            summarizeStartMs = Date.now();
             summary = await summarizeWithGroq(text, apiKey, { glossary: glossary || undefined });
+            summarizeEndMs = Date.now();
           } else {
             await updateJob({ progressPercentage: 60 });
-            const chunks = splitIntoChunks(text, SUMMARIZE_CHUNK_SIZE);
+            const chunks = splitIntoChunks(text, pipeline.summarizeChunkSize);
             const total = chunks.length;
             await updateJob({ totalChunks: total });
             send({
@@ -301,15 +329,33 @@ export async function POST(request: NextRequest) {
             });
 
             const chunkSummaries: string[] = [];
+            const jobStart = Date.now();
+            const delayMs = pipeline.summarizeChunkDelayMs;
+            summarizeStartMs = Date.now();
             for (let i = 0; i < chunks.length; i++) {
               if (await isJobCancelled(job.id)) {
                 controller.close();
                 return;
               }
-              const part = await summarizeWithGroq(chunks[i], apiKey, {
-                isChunk: true,
-                glossary: glossary || undefined,
-              });
+              const chunk = chunks[i];
+              const chunkStart = Date.now();
+              console.log(`[CHUNK ${i + 1}/${total}] Starting. Text length: ${chunk.length} chars`);
+
+              const { content: part, headers: responseHeaders } = await summarizeWithGroq(
+                chunk,
+                apiKey,
+                {
+                  isChunk: true,
+                  isAudio,
+                  glossary: glossary || undefined,
+                  returnHeaders: true,
+                }
+              );
+              const result = part;
+              console.log(
+                `>>> [CHUNK ${i + 1}/${total}] Summary length: ${result.length} chars (~${Math.round(result.length / 4)} tokens)`
+              );
+              console.log(`[CHUNK ${i + 1}/${total}] Done in ${Date.now() - chunkStart}ms`);
               chunkSummaries.push(part);
               await updateJob({
                 processedChunks: i + 1,
@@ -325,9 +371,18 @@ export async function POST(request: NextRequest) {
                 stepLabel: "Rangkuman",
               });
               if (i < chunks.length - 1) {
-                await sleep(SUMMARIZE_CHUNK_DELAY_MS);
+                console.log(`[CHUNK ${i + 1}/${total}] Sleeping ${delayMs}ms`);
+                await sleepChunkPacingFromGroqHeaders(responseHeaders, i, total);
+                console.log(
+                  `[CHUNK ${i + 1}/${total}] Sleep done. Total elapsed: ${Date.now() - jobStart}ms`
+                );
               }
             }
+
+            summarizeEndMs = Date.now();
+            console.log(
+              `>>> [TIMING] Summarization done in ${summarizeEndMs - summarizeStartMs!}ms`
+            );
 
             if (await isJobCancelled(job.id)) {
               controller.close();
@@ -342,18 +397,41 @@ export async function POST(request: NextRequest) {
               step: isAudio ? 2 : 1,
               stepLabel: "Gabung",
             });
-            await sleep(SUMMARIZE_MERGE_PRE_DELAY_MS);
-            summary = await mergeSummaries(chunkSummaries, apiKey, { glossary: glossary || undefined }, (cur, tot) => {
-              send({
-                type: "progress",
-                phase: "merge",
-                current: cur,
-                total: tot,
-                message: tot > 1 ? `Menggabungkan bagian ${cur} dari ${tot}…` : "Menggabungkan rangkuman…",
-                step: isAudio ? 2 : 1,
-                stepLabel: "Gabung",
-              });
+            console.log(
+              `>>> [MERGE] Phase starting. Total chunks: ${chunkSummaries.length}`
+            );
+            mergeStartMs = Date.now();
+            summary = await mergeSummaries(chunkSummaries, apiKey, {
+              glossary: glossary || undefined,
+              onProgress: (cur, tot) => {
+                send({
+                  type: "progress",
+                  phase: "merge",
+                  current: cur,
+                  total: tot,
+                  message:
+                    tot > 1
+                      ? `Menggabungkan bagian ${cur} dari ${tot}…`
+                      : "Menggabungkan rangkuman…",
+                  step: isAudio ? 2 : 1,
+                  stepLabel: "Gabung",
+                });
+              },
+              onBatchComplete: async (batchResults) => {
+                await updateJob({
+                  partialSummary: JSON.stringify({
+                    type: "merge_checkpoint",
+                    totalChunks: chunkSummaries.length,
+                    batchResults,
+                  }),
+                });
+                console.log(
+                  `>>> [MERGE CHECKPOINT] Saved ${batchResults.length} batch results to DB`
+                );
+              },
             });
+            mergeEndMs = Date.now();
+            console.log(`>>> [TIMING] Merge done in ${mergeEndMs - mergeStartMs!}ms`);
           }
 
           if (!summary) summary = "Rangkuman tidak dapat dibuat.";
@@ -361,6 +439,7 @@ export async function POST(request: NextRequest) {
           summary = truncateSummarySections(summary, 40);
           await updateJob({
             status: "completed",
+            partialSummary: null, // clear merge checkpoint
             progressPercentage: 100,
             summaryText: summary,
             sourceText: text,
@@ -368,6 +447,18 @@ export async function POST(request: NextRequest) {
             jobRetryContext: null,
             partialTranscript: null,
             processedTranscribeChunks: 0,
+            // Timing fields
+            totalDurationMs: Date.now() - pipelineJobStart,
+            transcribeDurationMs: transcribeEndMs && transcribeStartMs
+              ? transcribeEndMs - transcribeStartMs
+              : undefined,
+            summarizeDurationMs: summarizeEndMs && summarizeStartMs
+              ? summarizeEndMs - summarizeStartMs
+              : undefined,
+            mergeDurationMs: mergeEndMs && mergeStartMs
+              ? mergeEndMs - mergeStartMs
+              : undefined,
+            completedAt: new Date(),
           });
           if (audioPathToCleanup) deleteAudio(audioPathToCleanup);
           send({ type: "summary", text: summary });
@@ -378,7 +469,10 @@ export async function POST(request: NextRequest) {
               status: "waiting_rate_limit",
               retryAfter,
               extractedTextForRetry: text,
-              jobRetryContext: JSON.stringify({ flow: "summarize", isAudio }),
+              jobRetryContext: JSON.stringify({
+                isAudio,
+                summarizeChunkSize: pipeline.summarizeChunkSize,
+              }),
             });
             if (audioPathToCleanup) deleteAudio(audioPathToCleanup);
             send({

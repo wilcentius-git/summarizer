@@ -2,7 +2,7 @@ import { SignJWT, jwtVerify } from "jose";
 import bcrypt from "bcrypt";
 import { getJwtSecretKey } from "./jwt-secret";
 
-const JWT_EXPIRY = "7d";
+const JWT_EXPIRY = "5h";
 
 export async function hashPassword(password: string): Promise<string> {
   return bcrypt.hash(password, 12);

@@ -33,6 +33,7 @@ export function SummaryResultPanel({ summary }: SummaryResultProps) {
   const { user } = useAuth();
   const [copyFeedback, setCopyFeedback] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [passphraseModalKey, setPassphraseModalKey] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
 
   const copySummary = useCallback(() => {
@@ -139,6 +140,7 @@ export function SummaryResultPanel({ summary }: SummaryResultProps) {
             type="button"
             onClick={() => {
               if (!summary.text) return;
+              setPassphraseModalKey((k) => k + 1);
               setIsModalOpen(true);
             }}
             className="px-3 py-1.5 rounded bg-kemenkum-yellow text-kemenkum-blue text-sm font-medium hover:opacity-90"
@@ -167,6 +169,7 @@ export function SummaryResultPanel({ summary }: SummaryResultProps) {
         {copyFeedback ? "Rangkuman berhasil disalin ke clipboard" : ""}
       </div>
       <PassphraseModal
+        key={passphraseModalKey}
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
         onConfirm={onPassphraseConfirm}

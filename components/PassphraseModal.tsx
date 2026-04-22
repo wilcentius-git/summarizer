@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useState } from "react";
+import { useId, useState } from "react";
 
 export type PassphraseModalProps = {
   isOpen: boolean;
@@ -39,11 +39,10 @@ export function PassphraseModal({
   const titleId = useId();
   const hintId = useId();
 
-  useEffect(() => {
-    if (!isOpen) {
-      setPassphrase("");
-    }
-  }, [isOpen]);
+  const handleClose = () => {
+    setPassphrase("");
+    onClose();
+  };
 
   if (!isOpen) {
     return null;
@@ -144,7 +143,7 @@ export function PassphraseModal({
               )}
               <button
                 type="button"
-                onClick={onClose}
+                onClick={handleClose}
                 className="min-w-[6.5rem] rounded-lg border border-gray-200 bg-white px-4 py-2.5 text-sm font-medium text-gray-800 shadow-sm transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
                 disabled={isLoading}
               >

@@ -8,11 +8,12 @@ on:
     branches: [main]
     paths:
       - package.json
+      - package-lock.json
       - ".github/workflows/tag-version.yml"
   workflow_dispatch:
     inputs:
       version:
-        description: "Semver to tag (e.g. 0.25.1). Leave empty to use package.json version."
+        description: "Semver to tag (e.g. 0.29.1). Leave empty to use package.json version."
         required: false
         type: string
 

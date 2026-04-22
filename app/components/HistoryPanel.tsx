@@ -89,6 +89,7 @@ export function HistoryPanel({
     job: SummaryJobItem;
   } | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [passphraseModalKey, setPassphraseModalKey] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const sectionRef = useRef<HTMLElement | null>(null);
 
@@ -390,7 +391,10 @@ export function HistoryPanel({
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
-                    onClick={() => setIsModalOpen(true)}
+                    onClick={() => {
+                      setPassphraseModalKey((k) => k + 1);
+                      setIsModalOpen(true);
+                    }}
                     className="px-3 py-1.5 rounded-lg bg-yellow-400 text-gray-900 text-sm font-medium hover:opacity-90"
                   >
                     Export PDF
@@ -430,6 +434,7 @@ export function HistoryPanel({
         </>
       )}
       <PassphraseModal
+        key={passphraseModalKey}
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
         onConfirm={onPassphraseExportConfirm}

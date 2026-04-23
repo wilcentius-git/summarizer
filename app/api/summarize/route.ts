@@ -13,11 +13,9 @@ import { isJobCancelled } from "@/lib/check-cancelled";
 import {
   createOcrFallback,
   deduplicateParagraphs,
-  deduplicateSummaryPoints,
   isGroqRateLimitError,
   MAX_FILE_SIZE_BYTES,
   mergeSummaries,
-  sleep,
   sleepChunkPacingFromGroqHeaders,
   splitIntoChunks,
   summarizeWithGroq,
@@ -325,8 +323,6 @@ export async function POST(request: NextRequest) {
             });
 
             const chunkSummaries: string[] = [];
-            const jobStart = Date.now();
-            const delayMs = pipeline.summarizeChunkDelayMs;
             summarizeStartMs = Date.now();
             for (let i = 0; i < chunks.length; i++) {
               if (await isJobCancelled(job.id)) {
@@ -334,7 +330,6 @@ export async function POST(request: NextRequest) {
                 return;
               }
               const chunk = chunks[i];
-              const chunkStart = Date.now();
               console.log(`[CHUNK ${i + 1}/${total}] Starting. Text length: ${chunk.length} chars`);
 
               const { content: part, headers: responseHeaders } = await summarizeWithGroq(
@@ -347,11 +342,9 @@ export async function POST(request: NextRequest) {
                   returnHeaders: true,
                 }
               );
-              const result = part;
               console.log(
-                `>>> [CHUNK ${i + 1}/${total}] Summary length: ${result.length} chars (~${Math.round(result.length / 4)} tokens)`
+                `>>> [CHUNK ${i + 1}/${total}] Summary length: ${part.length} chars (~${Math.round(part.length / 4)} tokens)`
               );
-              console.log(`[CHUNK ${i + 1}/${total}] Done in ${Date.now() - chunkStart}ms`);
               chunkSummaries.push(part);
               await updateJob({
                 processedChunks: i + 1,
@@ -367,11 +360,7 @@ export async function POST(request: NextRequest) {
                 stepLabel: "Rangkuman",
               });
               if (i < chunks.length - 1) {
-                console.log(`[CHUNK ${i + 1}/${total}] Sleeping ${delayMs}ms`);
                 await sleepChunkPacingFromGroqHeaders(responseHeaders, i, total);
-                console.log(
-                  `[CHUNK ${i + 1}/${total}] Sleep done. Total elapsed: ${Date.now() - jobStart}ms`
-                );
               }
             }
 
@@ -431,7 +420,7 @@ export async function POST(request: NextRequest) {
           }
 
           if (!summary) summary = "Rangkuman tidak dapat dibuat.";
-          summary = deduplicateSummaryPoints(summary);
+          summary = deduplicateParagraphs(summary);
           summary = truncateSummarySections(summary, 40);
           await updateJob({
             status: "completed",

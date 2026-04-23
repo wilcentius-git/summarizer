@@ -4,14 +4,11 @@
  */
 
 import type jsPDF from "jspdf";
+import { sanitizeMultilineText } from "@/lib/text-utils";
 
 /** Strip markdown except **bold** - we preserve bold for PDF rendering. */
 export function prepareContentForPdf(text: string): string {
-  return text
-    .replace(/\r\n/g, "\n")
-    .replace(/\r/g, "\n")
-    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, "")
-    .replace(/\n{3,}/g, "\n\n")
+  return sanitizeMultilineText(text)
     .replace(/^#+\s*/gm, "")
     .replace(/^(\s*)[-*]\s+/gm, "$1• ")
     .replace(/(:\*\*)\s*\n+/g, "$1 ");
@@ -136,4 +133,65 @@ export function renderPdfContent(
   }
 
   return y;
+}
+
+/**
+ * One-column A4 PDF with a standard header (Dokumen, Tanggal dibuat) and body
+ * from {@link renderPdfContent}. Returns `null` when `text` is empty.
+ * Uses a dynamic `jspdf` import for client-friendly bundling.
+ */
+export async function buildJobPdf(
+  text: string,
+  filename: string
+): Promise<jsPDF | null> {
+  if (!text) return null;
+
+  const dateStr = new Date().toLocaleString("id-ID", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
+  const content = prepareContentForPdf(text);
+  const { jsPDF } = await import("jspdf");
+  const doc = new jsPDF({ unit: "mm", format: "a4" });
+  const margin = 20;
+  const maxWidth = 210 - margin * 2;
+  const lineHeight = 6;
+  const paragraphSpacing = 4;
+  const headingSpacing = 2;
+  const pageHeight = 297;
+  const maxY = pageHeight - margin;
+
+  let y = margin;
+
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(10);
+  doc.setTextColor(100, 100, 100);
+
+  const headerMaxW = maxWidth - 20;
+  const titleText = `Dokumen: ${filename}`;
+  const titleLineCount = doc.splitTextToSize(titleText, headerMaxW).length;
+  doc.text(titleText, margin, y, { maxWidth: headerMaxW });
+  y += titleLineCount * lineHeight;
+
+  doc.text(`Tanggal dibuat: ${dateStr}`, margin, y);
+  y += lineHeight;
+  y += 4;
+
+  doc.setTextColor(0, 0, 0);
+  renderPdfContent(doc, content, {
+    margin,
+    maxWidth,
+    lineHeight,
+    paragraphSpacing,
+    headingSpacing,
+    maxY,
+    startY: y,
+    fontSize: 11,
+  });
+
+  return doc;
 }

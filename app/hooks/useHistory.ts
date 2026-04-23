@@ -44,19 +44,9 @@ export function useHistory(user: { id: string } | null) {
   useEffect(() => {
     if (user && !hasFetched.current) {
       hasFetched.current = true;
-      void (async () => {
-        try {
-          const res = await fetch("/api/summary-jobs", { credentials: "include" });
-          if (res.ok) {
-            const data = await res.json();
-            setHistoryJobs(data.jobs ?? []);
-          }
-        } catch {
-          // Ignore initial fetch errors
-        }
-      })();
+      void fetchHistory();
     }
-  }, [user]);
+  }, [user, fetchHistory]);
 
   const deleteJob = useCallback(async (jobId: string) => {
     const res = await fetch(`/api/summary-jobs/${jobId}`, {

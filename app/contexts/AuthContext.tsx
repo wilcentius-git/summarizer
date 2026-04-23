@@ -35,8 +35,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const res = await fetch("/api/auth/me", { credentials: "include" });
       if (res.status === 401) {
         setUser(null);
-        const path =
-          typeof window !== "undefined" ? window.location.pathname : "";
+        const path = window.location.pathname;
         if (path !== "/login" && path !== "/register") {
           window.location.href = "/login";
         }

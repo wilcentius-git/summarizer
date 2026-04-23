@@ -2,7 +2,6 @@ import { describe, it, expect } from "vitest";
 import {
   splitIntoChunks,
   deduplicateParagraphs,
-  deduplicateSummaryPoints,
   fixCommonTypos,
   parseRetryAfterMs,
   sleep,
@@ -47,17 +46,14 @@ describe("deduplicateParagraphs", () => {
     const text = "First\n\nSecond\n\nThird";
     expect(deduplicateParagraphs(text)).toBe(text);
   });
-});
 
-describe("deduplicateSummaryPoints", () => {
-  it("removes duplicate summary points", () => {
+  it("removes duplicate summary-style points", () => {
     const text = "Point one\n\nPoint one\n\nPoint two";
-    const result = deduplicateSummaryPoints(text);
-    expect(result).toBe("Point one\n\nPoint two");
+    expect(deduplicateParagraphs(text)).toBe("Point one\n\nPoint two");
   });
 
-  it("returns empty for empty input", () => {
-    expect(deduplicateSummaryPoints("  ")).toBe("  ");
+  it("returns whitespace-only input unchanged", () => {
+    expect(deduplicateParagraphs("  ")).toBe("  ");
   });
 });
 

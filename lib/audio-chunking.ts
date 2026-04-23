@@ -10,10 +10,11 @@ import ffmpeg from "fluent-ffmpeg";
 import ffmpegStatic from "ffmpeg-static";
 import ffprobeInstaller from "@ffprobe-installer/ffprobe";
 
-if (ffmpegStatic) {
-  ffmpeg.setFfmpegPath(ffmpegStatic);
-}
-ffmpeg.setFfprobePath((ffprobeInstaller as { path: string }).path);
+const ffmpegPath = process.env.FFMPEG_PATH ?? ffmpegStatic ?? "ffmpeg";
+const ffprobePath = process.env.FFPROBE_PATH ?? (ffprobeInstaller as { path: string }).path;
+
+ffmpeg.setFfmpegPath(ffmpegPath);
+ffmpeg.setFfprobePath(ffprobePath);
 
 /** Chunk duration in seconds (~4 min). Keeps each request under Cloudflare ~100s timeout. */
 export const AUDIO_CHUNK_DURATION_SEC = 240;
@@ -118,6 +119,15 @@ export async function chunkAudioBuffer(
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "audio-chunk-"));
   const inputPath = path.join(tmpDir, path.basename(fileName) || "audio.mp3");
 
+  const cleanup = () => {
+    try {
+      fs.unlinkSync(inputPath);
+      fs.rmdirSync(tmpDir);
+    } catch {
+      /* ignore */
+    }
+  };
+
   try {
     fs.writeFileSync(inputPath, buffer);
     const durationSec = await getAudioDurationSeconds(inputPath);
@@ -125,36 +135,14 @@ export async function chunkAudioBuffer(
     if (!shouldChunkAudio(durationSec, buffer.length)) {
       return {
         chunks: [{ buffer, startSec: 0, endSec: durationSec }],
-        cleanup: () => {
-          try {
-            fs.unlinkSync(inputPath);
-            fs.rmdirSync(tmpDir);
-          } catch {
-            /* ignore */
-          }
-        },
+        cleanup,
       };
     }
 
     const chunks = await splitAudioIntoChunks(inputPath, durationSec);
-    return {
-      chunks,
-      cleanup: () => {
-        try {
-          fs.unlinkSync(inputPath);
-          fs.rmdirSync(tmpDir);
-        } catch {
-          /* ignore */
-        }
-      },
-    };
+    return { chunks, cleanup };
   } catch (err) {
-    try {
-      if (fs.existsSync(inputPath)) fs.unlinkSync(inputPath);
-      fs.rmdirSync(tmpDir);
-    } catch {
-      /* ignore */
-    }
+    cleanup();
     throw err;
   }
 }

@@ -1,26 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import type { FileItem } from "@/app/components/FileUpload";
+import { useElapsedTimer } from "@/app/hooks/useElapsedTimer";
 import type { SummaryJobItem } from "@/app/hooks/useHistory";
-import { SUMMARIZE_PIPELINE_STANDARD } from "@/lib/summarize-pipeline";
-
-const AUDIO_EXTENSIONS = [".mp3", ".mp4", ".mpeg", ".mpga", ".m4a", ".wav", ".webm", ".flac", ".ogg"];
-
-function isAudioFile(file: File): boolean {
-  if (["audio/mpeg", "audio/mp3", "audio/mp4", "audio/mpga", "audio/wav", "audio/webm", "audio/flac", "audio/ogg"].includes(file.type)) return true;
-  const ext = file.name.toLowerCase().slice(file.name.lastIndexOf("."));
-  return AUDIO_EXTENSIONS.includes(ext);
-}
-
-function sanitizeSummaryText(s: string): string {
-  if (!s) return s;
-  return s
-    .replace(/\r\n/g, "\n")
-    .replace(/\r/g, "\n")
-    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, "")
-    .replace(/\n{3,}/g, "\n\n");
-}
+import { sanitizeMultilineText } from "@/lib/text-utils";
 
 function toUserFriendlyError(msg: string): string {
   if (/41[23]/.test(msg)) return "You used up a per-minute quota.";
@@ -28,40 +12,17 @@ function toUserFriendlyError(msg: string): string {
   return msg;
 }
 
-function estimateSummarizeSeconds(fileSizeBytes: number): number {
-  return Math.max(30, Math.ceil(fileSizeBytes / 50000) * 45);
-}
-
-function estimateAudioTranscribeSeconds(
-  durationSeconds: number | undefined,
-  fileSizeBytes: number
-): number {
-  const pipe = SUMMARIZE_PIPELINE_STANDARD;
-  const TRANSCRIBE_CHUNK_STEP_SEC = 238;
-  const TRANSCRIBE_SEC_PER_CHUNK = 55;
-  const CHARS_PER_MIN_AUDIO = 900;
-  const SUMMARIZE_SEC_PER_CHUNK = 42;
-  const MERGE_OVERHEAD_SEC = 60;
-
-  let durationMin: number;
-  if (durationSeconds != null && durationSeconds > 0) {
-    durationMin = durationSeconds / 60;
-  } else {
-    const mb = fileSizeBytes / (1024 * 1024);
-    durationMin = Math.max(1, mb);
+function handleStreamError(
+  err: unknown,
+  isPausing: boolean,
+  setError: (m: string | null) => void,
+  fallbackMessage: string
+) {
+  if (err instanceof Error && err.name === "AbortError" && !isPausing) {
+    setError("Dibatalkan.");
+  } else if (!(err instanceof Error && err.name === "AbortError")) {
+    setError(toUserFriendlyError(err instanceof Error ? err.message : fallbackMessage));
   }
-
-  const durationSec = durationMin * 60;
-  const transChunks =
-    durationSec <= 300 && fileSizeBytes <= 8 * 1024 * 1024
-      ? 1
-      : Math.ceil(durationSec / TRANSCRIBE_CHUNK_STEP_SEC);
-  const transcriptChars = durationMin * CHARS_PER_MIN_AUDIO;
-  const sumChunks = Math.max(1, Math.ceil(transcriptChars / pipe.summarizeChunkSize));
-
-  const transTime = transChunks * TRANSCRIBE_SEC_PER_CHUNK;
-  const sumTime = sumChunks * SUMMARIZE_SEC_PER_CHUNK + MERGE_OVERHEAD_SEC;
-  return Math.max(60, Math.ceil(transTime + sumTime));
 }
 
 export type SummarizeProgress = {
@@ -84,74 +45,39 @@ export function useSummarize(
 ) {
   const [summarizeLoading, setSummarizeLoading] = useState<string | null>(null);
   const [summarizeProgress, setSummarizeProgress] = useState<SummarizeProgress | null>(null);
-  const [estimatedSeconds, setEstimatedSeconds] = useState<number | null>(null);
-  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const elapsedSeconds = useElapsedTimer(!!summarizeLoading);
   const [currentSummarizeJobId, setCurrentSummarizeJobId] = useState<string | null>(null);
   const [liveSourceText, setLiveSourceText] = useState<string>("");
   const summarizeAbortRef = useRef<AbortController | null>(null);
 
   const [resumeLoading, setResumeLoading] = useState<string | null>(null);
   const [resumeProgress, setResumeProgress] = useState<SummarizeProgress | null>(null);
-  const [resumeElapsedSeconds, setResumeElapsedSeconds] = useState(0);
+  const resumeElapsedSeconds = useElapsedTimer(!!resumeLoading);
   const resumeAbortRef = useRef<AbortController | null>(null);
   const isPausingRef = useRef(false);
 
-  useEffect(() => {
-    if (!summarizeLoading) {
-      setElapsedSeconds(0);
-      return;
-    }
-    const start = Date.now();
-    const interval = setInterval(() => {
-      setElapsedSeconds(Math.floor((Date.now() - start) / 1000));
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [summarizeLoading]);
-
-  useEffect(() => {
-    if (!resumeLoading) {
-      setResumeElapsedSeconds(0);
-      return;
-    }
-    const start = Date.now();
-    const interval = setInterval(() => {
-      setResumeElapsedSeconds(Math.floor((Date.now() - start) / 1000));
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [resumeLoading]);
-
-  const pauseSummarize = useCallback(async () => {
-    isPausingRef.current = true;
-    summarizeAbortRef.current?.abort();
-    if (currentSummarizeJobId) {
-      try {
-        await fetch(`/api/summary-jobs/${currentSummarizeJobId}/cancel`, {
-          method: "POST",
-          credentials: "include",
-        });
-        fetchHistory();
-      } catch {
-        // Ignore
+  const cancelSummarizeJob = useCallback(
+    async (isPausing: boolean) => {
+      if (isPausing) isPausingRef.current = true;
+      summarizeAbortRef.current?.abort();
+      if (currentSummarizeJobId) {
+        try {
+          await fetch(`/api/summary-jobs/${currentSummarizeJobId}/cancel`, {
+            method: "POST",
+            credentials: "include",
+          });
+          fetchHistory();
+        } catch {
+          // Ignore
+        }
       }
-    }
-    setCurrentSummarizeJobId(null);
-  }, [currentSummarizeJobId, fetchHistory]);
+      setCurrentSummarizeJobId(null);
+    },
+    [currentSummarizeJobId, fetchHistory]
+  );
 
-  const abortSummarize = useCallback(async () => {
-    summarizeAbortRef.current?.abort();
-    if (currentSummarizeJobId) {
-      try {
-        await fetch(`/api/summary-jobs/${currentSummarizeJobId}/cancel`, {
-          method: "POST",
-          credentials: "include",
-        });
-        fetchHistory();
-      } catch {
-        // Ignore
-      }
-    }
-    setCurrentSummarizeJobId(null);
-  }, [currentSummarizeJobId, fetchHistory]);
+  const pauseSummarize = useCallback(() => cancelSummarizeJob(true), [cancelSummarizeJob]);
+  const abortSummarize = useCallback(() => cancelSummarizeJob(false), [cancelSummarizeJob]);
 
   const handleSummarize = useCallback(
     async (item: FileItem, glossary?: string) => {
@@ -161,11 +87,6 @@ export function useSummarize(
       setLiveSourceText("");
       setSummarizeLoading(item.id);
       setSummarizeProgress({ phase: "extracting", current: 0, total: 1 });
-      setEstimatedSeconds(
-        isAudioFile(item.file)
-          ? estimateAudioTranscribeSeconds(item.durationSeconds, item.size)
-          : estimateSummarizeSeconds(item.size)
-      );
 
       const controller = new AbortController();
       summarizeAbortRef.current = controller;
@@ -229,7 +150,7 @@ export function useSummarize(
                   mergeRound: data.mergeRound,
                 });
               } else if (data.type === "sourceText") {
-                setLiveSourceText(sanitizeSummaryText(data.text ?? ""));
+                setLiveSourceText(sanitizeMultilineText(data.text ?? ""));
               } else if (data.type === "summary") {
                 void fetchHistory().then(() => {
                   onSuccessfulCompletion?.();
@@ -250,16 +171,11 @@ export function useSummarize(
           }
         }
       } catch (err) {
-        if (err instanceof Error && err.name === "AbortError" && !isPausingRef.current) {
-          setError("Dibatalkan.");
-        } else if (!(err instanceof Error && err.name === "AbortError")) {
-          setError(toUserFriendlyError(err instanceof Error ? err.message : "Summarize failed."));
-        }
+        handleStreamError(err, isPausingRef.current, setError, "Summarize failed.");
       } finally {
         isPausingRef.current = false;
         setSummarizeLoading(null);
         setSummarizeProgress(null);
-        setEstimatedSeconds(null);
         setCurrentSummarizeJobId(null);
         setLiveSourceText("");
         summarizeAbortRef.current = null;
@@ -269,38 +185,27 @@ export function useSummarize(
     [groqApiKey, fetchHistory, setError, onSuccessfulCompletion]
   );
 
-  const pauseResume = useCallback(async () => {
-    isPausingRef.current = true;
-    resumeAbortRef.current?.abort();
-    const jobId = resumeLoading;
-    if (jobId) {
-      try {
-        await fetch(`/api/summary-jobs/${jobId}/cancel`, {
-          method: "POST",
-          credentials: "include",
-        });
-        fetchHistory();
-      } catch {
-        // Ignore
+  const cancelResumeJob = useCallback(
+    async (isPausing: boolean) => {
+      if (isPausing) isPausingRef.current = true;
+      resumeAbortRef.current?.abort();
+      if (resumeLoading) {
+        try {
+          await fetch(`/api/summary-jobs/${resumeLoading}/cancel`, {
+            method: "POST",
+            credentials: "include",
+          });
+          fetchHistory();
+        } catch {
+          // Ignore
+        }
       }
-    }
-  }, [resumeLoading, fetchHistory]);
+    },
+    [resumeLoading, fetchHistory]
+  );
 
-  const abortResume = useCallback(async () => {
-    resumeAbortRef.current?.abort();
-    const jobId = resumeLoading;
-    if (jobId) {
-      try {
-        await fetch(`/api/summary-jobs/${jobId}/cancel`, {
-          method: "POST",
-          credentials: "include",
-        });
-        fetchHistory();
-      } catch {
-        // Ignore
-      }
-    }
-  }, [resumeLoading, fetchHistory]);
+  const pauseResume = useCallback(() => cancelResumeJob(true), [cancelResumeJob]);
+  const abortResume = useCallback(() => cancelResumeJob(false), [cancelResumeJob]);
 
   const handleResumeJob = useCallback(
     async (job: SummaryJobItem) => {
@@ -414,11 +319,7 @@ export function useSummarize(
           }
         }
       } catch (err) {
-        if (err instanceof Error && err.name === "AbortError" && !isPausingRef.current) {
-          setError("Dibatalkan.");
-        } else if (!(err instanceof Error && err.name === "AbortError")) {
-          setError(toUserFriendlyError(err instanceof Error ? err.message : "Resume failed."));
-        }
+        handleStreamError(err, isPausingRef.current, setError, "Resume failed.");
       } finally {
         isPausingRef.current = false;
         setResumeLoading(null);
@@ -434,7 +335,6 @@ export function useSummarize(
     summarizeLoading,
     summarizeProgress,
     liveSourceText,
-    estimatedSeconds,
     elapsedSeconds,
     resumeLoading,
     resumeProgress,

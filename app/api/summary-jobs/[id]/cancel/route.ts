@@ -18,24 +18,30 @@ export async function POST(
 
     const { id: jobId } = await params;
 
-    const job = await prisma.summaryJob.findFirst({
-      where: { id: jobId, userId: payload.userId },
-    });
-
-    if (!job) {
-      return NextResponse.json({ error: "Job not found" }, { status: 404 });
-    }
-
-    if (job.status === "completed") {
-      return NextResponse.json({ error: "Job already completed" }, { status: 400 });
-    }
-
-    await prisma.summaryJob.update({
-      where: { id: jobId },
+    const updated = await prisma.summaryJob.updateMany({
+      where: {
+        id: jobId,
+        userId: payload.userId,
+        status: { not: "completed" },
+      },
       data: { status: "cancelled" },
     });
 
-    return NextResponse.json({ success: true });
+    if (updated.count > 0) {
+      return NextResponse.json({ success: true });
+    }
+
+    // No row updated: not found, wrong owner, or already completed — disambiguate for HTTP semantics.
+    const job = await prisma.summaryJob.findFirst({
+      where: { id: jobId, userId: payload.userId },
+    });
+    if (!job) {
+      return NextResponse.json({ error: "Job not found" }, { status: 404 });
+    }
+    if (job.status === "completed") {
+      return NextResponse.json({ error: "Job already completed" }, { status: 400 });
+    }
+    return NextResponse.json({ error: "Cannot cancel this job" }, { status: 500 });
   } catch (err) {
     console.error("Cancel job error:", err);
     return NextResponse.json(

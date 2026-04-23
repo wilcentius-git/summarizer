@@ -22,6 +22,8 @@ venv
 .DS_Store
 *.pem
 case_example
+# local job audio (not needed in image; slows COPY build context)
+uploads/
 
 # debug
 npm-debug.log*

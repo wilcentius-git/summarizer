@@ -1,13 +1,14 @@
-# Document Summarizer
+# Kemenkum Summarizer
 
-A simple web app to upload documents and get AI-generated summaries.
+A web app for uploading documents and audio and getting AI-generated summaries, built for the IT Division of Kementerian Hukum.
 
 ## Features
 
-- **Upload documents** – Add files via file picker or drag and drop (max 500 MB per file). Supports: **PDF**, **DOCX**, **DOC**, **TXT**, **RTF**, **ODT**, **SRT**, **MP3**, **WAV**, **M4A**, **WebM**, **FLAC**, **OGG**.
-- **Summarize** – Extract text and get a concise summary via Groq (Llama). Supports scanned PDFs via OCR (Groq Vision) and **audio transcription** via Groq Whisper (MP3, WAV, etc., max 200 MB upload; long audio is chunked for the API).
-- **Optional technical terms** – After you add a file to the queue, you can fill **Istilah teknis (opsional)** with abbreviations or jargon (e.g. `PSSI, KPI, XSS, CI/CD`). They are sent to Whisper as a transcription **prompt** (helps spelling of rare terms) and to the summarizer so it keeps those spellings and interprets the domain better.
-- **Segmented Summarize** – Works on text with **label and opinion format** (e.g., speaker-labeled transcripts, structured opinions). The model checks the format first; if not found, returns "no segmented opinion format". For **audio (MP3, etc.)**: optionally use **pyannote.audio** (via WhisperX) for speaker diarization when a Hugging Face token is provided.
+- **Upload files** – File picker or drag and drop. **Documents** (PDF, DOCX, DOC, TXT, RTF, ODT, SRT) up to **500 MB**. **Audio** (MP3, WAV, M4A, WebM, FLAC, OGG) up to **200 MB**.
+- **Summarize** – Extract text and summarize via Groq (**LLaMA**). Scanned PDFs use OCR (Groq Vision). Audio is transcribed with Groq Whisper (`whisper-large-v3-turbo`); long audio is chunked automatically (ffmpeg, with overlap).
+- **Optional glossary** – **Istilah teknis (opsional)** holds domain terms (e.g. `PSSI, KPI, XSS, CI/CD`). Passed to Whisper as a transcription prompt and into the summarizer prompt for context and spelling.
+- **Resume** – Jobs stopped by rate limits or cancellation can resume from partial transcription or partial chunk summaries.
+- **History** – Past jobs show status, duration breakdown, and PDF export (signed via BSrE / Pusdatin TTE where configured).
 
 ## Setup
 
@@ -17,80 +18,37 @@ A simple web app to upload documents and get AI-generated summaries.
    npm install
    ```
 
-2. Run the dev server:
+2. Copy env template and configure:
+
+   ```bash
+   cp .env.local.example .env.local
+   ```
+
+   | Variable | Description |
+   |----------|-------------|
+   | `DATABASE_URL` | **Required** for Prisma. Use PostgreSQL, e.g. `postgresql://USER:PASSWORD@localhost:5432/DBNAME` (see `docker-compose.yml` for a full stack example). |
+   | `JWT_SECRET` | Secret for signing auth tokens (use a long random string). |
+   | `GROQ_API_KEY` | Optional server-side Groq key; users can still enter **kunci groq sendiri (opsional)** in the UI. Also used by the rate-limit worker. |
+   | `PUSDATIN_BEARER_TOKEN` | Bearer for Kemenkum **Simpeg login** (`login_simpeg`). The PDF signing route (`tte_sign`) uses the same e-arsip host; use the token your environment expects for those APIs. |
+   | `SEED_ADMIN_PASSWORD` | For `npx prisma db seed` (admin user). |
+
+3. Run migrations:
+
+   ```bash
+   npx prisma migrate deploy
+   ```
+
+   For local schema iteration: `npx prisma migrate dev`.
+
+4. Start the app (Next.js + rate-limit worker):
 
    ```bash
    npm run dev
    ```
 
-3. Open [http://localhost:3000](http://localhost:3000) and enter your Groq API key in the form (get a free key at [console.groq.com](https://console.groq.com)). The key is cached for 1 hour in your browser.
+5. Open [http://localhost:3000](http://localhost:3000), sign in with **NIP** via Simpeg. Optional Groq key in the form is cached ~1 hour in the browser (`sessionStorage`).
 
-4. (Optional) After uploading a file, use **Istilah teknis** on that row before clicking **Summarize** if the content uses domain-specific vocabulary.
-
-### Segmented Summarize with speaker diarization (optional)
-
-For **audio files** with speaker labels via pyannote:
-
-1. Install Python 3.8+ and create a virtual environment:
-   ```bash
-   python -m venv summarizer_venv
-   .\summarizer_venv\Scripts\pip.exe install -r scripts/requirements.txt   # Windows
-   # or: summarizer_venv/bin/pip install -r scripts/requirements.txt       # macOS/Linux
-   ```
-   The app uses `summarizer_venv` automatically when it exists.
-
-2. To run the diarize script from the CLI, activate the venv first:
-   ```powershell
-   .\summarizer_venv\Scripts\Activate.ps1   # Windows PowerShell
-   # or: summarizer_venv\Scripts\activate.bat   # Windows cmd
-   # or: source summarizer_venv/bin/activate    # macOS/Linux
-   ```
-   Then run: `python scripts/diarize_transcribe.py <audio_path> <hf_token>`
-
-3. Accept the pyannote model license at [huggingface.co/pyannote/speaker-diarization-3.1](https://huggingface.co/pyannote/speaker-diarization-3.1).
-
-4. Create a Hugging Face token at [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens) and enter it in the app when using Segmented Summarize on audio. For CLI usage, pass it as the second argument.
-
-Without the HF token, Segmented Summarize on audio falls back to Groq Whisper (no speaker labels).
-
-**If you get Hugging Face Hub download errors** (e.g. "cannot find the appropriate snapshot folder"), pre-download the model when your connection is stable:
-
-```bash
-python scripts/pre_download_pyannote.py <your_hf_token>
-# Or set HF_TOKEN or HUGGINGFACE_API_KEY in .env.local
-```
-
-### GPU (CUDA) support for faster diarization
-
-By default, `pip install -r scripts/requirements.txt` installs PyTorch CPU-only. For **GPU acceleration** (much faster on long audio):
-
-**Note:** PyTorch CUDA wheels for Windows support **Python 3.8–3.12** only. If you use Python 3.13+, create a venv with Python 3.12: `py -3.12 -m venv summarizer_venv`
-
-1. Check your CUDA version: `nvidia-smi` (e.g. 12.1 or 11.8).
-2. Install PyTorch with CUDA (use venv first: `.\summarizer_venv\Scripts\Activate.ps1` on Windows):
-   ```bash
-   npm run install:gpu
-   ```
-   Or manually: `pip install -r scripts/requirements-cuda.txt`
-   For CUDA 11.8, edit `scripts/requirements-cuda.txt` and change `cu121` to `cu118`.
-3. Verify: `python -c "import torch; print('CUDA:', torch.cuda.is_available())"` → should print `CUDA: True`.
-
-The app will use GPU automatically when available and show `[GPU (CUDA)]` or `[CPU]` in the summary caption.
-
-### TorchCodec / FFmpeg issues on Windows
-
-If diarization fails with "Could not load libtorchcodec" or FFmpeg DLL errors when using Segmented Summarize from the web app (but works from CLI), the script now uses **torchaudio** for audio loading to bypass torchcodec. If you still see issues:
-
-1. **Uninstall torchcodec** (pyannote will fall back to torchaudio):
-   ```bash
-   .\summarizer_venv\Scripts\Activate.ps1
-   pip uninstall torchcodec -y
-   ```
-2. Or install FFmpeg "full-shared" with DLLs: [ffmpeg.org](https://ffmpeg.org/download.html) → Windows builds → "full-shared".
-
-### API timeout
-
-The Segmented Summarize API allows up to **2 hours** (`maxDuration: 7200`) for long audio diarization. Local dev has no timeout; Vercel caps by plan (Hobby: 10s, Pro: 60s, Enterprise: 900s).
+**Local HTTPS / Simpeg:** If Simpeg or TTE calls fail on certificate verification in dev, see comments in `.env.local.example` (never disable TLS verification in production).
 
 ## Build
 
@@ -99,114 +57,93 @@ npm run build
 npm start
 ```
 
+Worker only: `npm run worker` (or use `npm run start:all` to run Next + worker together).
+
 ## Docker
 
-**Build:**
+Preferred: **Docker Compose** (app + PostgreSQL + uploads volume):
+
+```bash
+docker compose up --build       # foreground; Ctrl+C to stop
+docker compose up -d --build    # background; docker compose down to stop
+```
+
+Compose sets `DATABASE_URL`, `FFMPEG_PATH`, and `FFPROBE_PATH`. Add `.env` or extend `env_file` if you need `GROQ_API_KEY`, `JWT_SECRET`, or `PUSDATIN_BEARER_TOKEN` in containers.
+
+**Image only:**
 
 ```bash
 docker build -t summarizer .
 ```
 
-**Run (foreground – use Ctrl+C to stop):**
+The container runs `prisma migrate deploy` then `node server.js`. You must supply a valid **`DATABASE_URL`** (and other secrets) at run time—e.g. point at an external Postgres instance.
 
-```bash
-   docker run -p 3000:3000 summarizer
-```
+## Deploy (e.g. Vercel)
 
-```bash
-docker run --rm -p 3000:3000 -v summarizer-db:/app/data -e DATABASE_URL="file:/app/data/prod.db" -e JWT_SECRET="change-this-to-a-secure-random-string-in-production" -e NODE_ENV=development summarizer
-```
+Provide **`DATABASE_URL`**, **`JWT_SECRET`**, and any **Pusdatin / Groq** secrets your deployment needs. Users can still paste their own Groq key in the app.
 
-**Run (background):**
-
-```bash
-docker run -d -p 3000:3000 --name summarizer summarizer
-```
-
-**Stop (when running in background):**
-
-```bash
-docker stop summarizer
-```
-
-**Or with Docker Compose:**
-
-```bash
-docker compose up --build    # Ctrl+C to stop
-# or
-docker compose up -d --build # background; use: docker compose down
-```
-
-Open [http://localhost:3000](http://localhost:3000). Users enter their Groq API key in the app. To pass `GROQ_API_KEY` via env, create `.env.local` and uncomment the `env_file` section in `docker-compose.yml`.
-
-## Deploy to Vercel
-
-No environment variables needed—users enter their own Groq API key in the app:
-
-```bash
-vercel
-```
-
-Or connect your repo to [Vercel](https://vercel.com) for automatic deployments.
-
-## Tech
-
-- Next.js 16 (App Router), React 18, TypeScript
-- **pdf-parse** for PDF text extraction; **pdf-to-img** for PDF-to-image when text is missing (scanned PDFs)
-- **mammoth** for DOCX/DOC text extraction; **rtf-parser** for RTF; **adm-zip** for ODT
-- **Groq API** for summaries (text), OCR/image understanding (Llama 4 Scout Vision), and **speech-to-text** (Whisper Large V3 Turbo)
+`/api/summarize` does not set a long `maxDuration` in code; platform limits apply. Long jobs are easier on Docker or a long-lived Node host. **`/api/summary-jobs/[id]/resume`** sets `maxDuration = 7200` (2 hours) for large resume work where the platform honors it.
 
 ## Architecture
 
-### Document Summarization Flow
+### Summarization flow
 
-1. **Text extraction** – Text is extracted by format:
-   - **TXT**: Direct UTF-8 decode
-   - **DOCX/DOC**: mammoth
-   - **RTF**: rtf-parser
-   - **ODT**: adm-zip + XML parsing
-   - **SRT**: Custom parser (timestamps + speaker turns)
-   - **PDF**: pdf-parse first; if text is empty or very short (< 50 chars), falls back to OCR
-   - **Audio (MP3, WAV, M4A, etc.)**: Groq Whisper (`whisper-large-v3-turbo`) transcribes to text. If the user provided optional **Istilah teknis**, that string is passed as the Whisper API `prompt` on each audio chunk, then summarization proceeds as usual.
+1. **Text extraction**
+   - **TXT**: UTF-8 decode  
+   - **DOCX/DOC**: mammoth  
+   - **RTF**: rtf-parser  
+   - **ODT**: adm-zip + XML  
+   - **SRT**: custom parser  
+   - **PDF**: pdf-parse; OCR fallback if text is empty or very short (< 50 chars)  
+   - **Audio**: Groq Whisper; files over **~5 min** or **~8 MB** are split with ffmpeg (~4 min segments, **2 s** overlap)—see `lib/audio-chunking.ts`
 
-2. **Glossary for summarization** – When **Istilah teknis** is set, the same string is appended to the summarizer system prompt so technical spellings are preserved and the model has domain context (applies to documents and audio alike).
+2. **PDF OCR** (when needed): `pdf-to-img` → Groq Vision (`meta-llama/llama-4-scout-17b-16e-instruct`), max **20** pages, `[Halaman N]` markers.
 
-3. **PDF OCR fallback** – For scanned PDFs:
-   - `pdf-to-img` converts pages to PNG images (scale 3, max 20 pages)
-   - Each page is sent to Groq Vision API (`meta-llama/llama-4-scout-17b-16e-instruct`)
-   - Extracted text is concatenated with `[Halaman N]` markers
+3. **Chunking** – Long text is split at natural boundaries. Default summarize chunk size is **~4,500** characters with **~6 s** between chunk requests and header-based pacing (`lib/summarize-pipeline.ts` → `SUMMARIZE_PIPELINE_STANDARD`).
 
-4. **Chunking** – If text exceeds ~8,000 chars (~2,000 tokens):
-   - Split at natural boundaries (paragraph, line, sentence)
-   - Each chunk summarized separately with `llama-3.1-8b-instant`
-   - 2.5 s delay between chunk requests to avoid rate limits
+4. **Merge** – Chunk summaries are merged in one or more Groq rounds. **429 / 524** responses are retried using API hints (e.g. `Retry-After`, message parsing) and configured delays between merge batches—not a single global “exponential backoff” policy everywhere.
 
-5. **Merge** – Chunk summaries are merged recursively until a single summary remains. Retries on 429 (rate limit) up to 3 times.
+5. **Streaming** – NDJSON lines: `progress`, `sourceText` (when applicable), `summary`, `error`.
 
-6. **Response** – Streamed as NDJSON: `progress` events, then `summary` or `error`.
+### Job lifecycle
 
-### Segmented Summarize Flow
+Statuses in Prisma (see `prisma/schema.prisma`):
 
-1. **Text extraction** – Documents: same as Summarize. Audio: if Hugging Face token provided, run `scripts/diarize_transcribe.py` (WhisperX + pyannote) for speaker-labeled transcript; otherwise Groq Whisper (single speaker).
+| Status | Meaning |
+|--------|---------|
+| `pending` | Created, not started |
+| `processing` | Running |
+| `waiting_rate_limit` | Groq rate limited; worker or user can retry |
+| `completed` | Done |
+| `failed` | Error |
+| `cancelled` | User cancelled |
 
-2. **Format check** – LLM checks if text has "label and opinion" format (e.g., `Speaker: opinion`, `Topic: opinion`). If not, returns `no segmented opinion format`.
-
-3. **Segmented summarization** – If format valid, LLM groups by topic and summarizes each speaker's opinion per topic in Indonesian, with stance labels: **pro** (mendukung), **con** (menentang), or **performative** (netral/formal).
-
-4. **Response** – JSON with `summary` (topic-based, per-speaker opinions + stance) or `error` (e.g., `no segmented opinion format`).
+Partial work can be resumed from history (**Lanjutkan**) when the backend still has transcript chunks or chunk summaries to continue from.
 
 ### Models
 
-| Purpose            | Model                                      |
-|--------------------|--------------------------------------------|
-| Text summarization | `llama-3.1-8b-instant`                     |
-| PDF OCR (Vision)   | `meta-llama/llama-4-scout-17b-16e-instruct`|
-| Audio transcription| `whisper-large-v3-turbo`                   |
-| Segmented summarize| `llama-3.1-8b-instant`                     |
-| Speaker diarization| WhisperX + pyannote (optional, Python)     |
+| Purpose | Model |
+|---------|--------|
+| Text summarization (incl. merge) | `llama-3.1-8b-instant` |
+| PDF OCR (Vision) | `meta-llama/llama-4-scout-17b-16e-instruct` |
+| Audio transcription | `whisper-large-v3-turbo` |
 
 ### Limits
 
-- Max file size: 500 MB (documents), 200 MB (audio)
-- Max transcript length (meeting): 30,000 chars
-- Max PDF pages for OCR: 20
+| Item | Value |
+|------|--------|
+| Document upload | 500 MB |
+| Audio upload | 200 MB |
+| PDF pages (OCR) | 20 |
+| Resume route (`/api/summary-jobs/[id]/resume`) | `maxDuration` 7200 s where supported |
+
+## Tech
+
+- **Frontend:** Next.js 16 (App Router), React 18, TypeScript, Tailwind CSS  
+- **Backend / DB:** Prisma, **PostgreSQL** (`DATABASE_URL`)  
+- **Auth:** JWT; **Simpeg** login (`lib/simpeg-login.ts`) with NIP  
+- **AI:** Groq — Whisper for transcription, LLaMA for summarization (see Models)  
+- **PDF:** pdf-parse; pdf-to-img + **@napi-rs/canvas** for OCR rasterization  
+- **Documents:** mammoth, rtf-parser, adm-zip  
+- **Audio:** ffmpeg (chunking), fluent-ffmpeg, @ffprobe-installer/ffprobe  
+- **Export:** jsPDF; server route for **TTE** signing (`/api/sign-pdf`)

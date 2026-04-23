@@ -16,17 +16,6 @@ export {
 
 export const MAX_FILE_SIZE_BYTES = 500 * 1024 * 1024; // 500 MB
 
-/** @deprecated Prefer {@link SUMMARIZE_PIPELINE_STANDARD} fields — kept for worker / imports. */
-export const SUMMARIZE_CHUNK_SIZE = SUMMARIZE_PIPELINE_STANDARD.summarizeChunkSize;
-export const SUMMARIZE_CHUNK_DELAY_MS = SUMMARIZE_PIPELINE_STANDARD.summarizeChunkDelayMs;
-export const SUMMARIZE_MERGE_CHUNK_SIZE = SUMMARIZE_PIPELINE_STANDARD.mergeChunkSize;
-export const SUMMARIZE_MERGE_CHUNK_DELAY_MS = SUMMARIZE_PIPELINE_STANDARD.mergeChunkDelayMs;
-export const SUMMARIZE_MERGE_THRESHOLD = SUMMARIZE_PIPELINE_STANDARD.mergeThreshold;
-export const SUMMARIZE_MERGE_PRE_DELAY_MS = SUMMARIZE_PIPELINE_STANDARD.mergePreDelayMs;
-export const SUMMARIZE_MERGE_RATE_LIMIT_BACKOFF_MS =
-  SUMMARIZE_PIPELINE_STANDARD.mergeRateLimitBackoffMs;
-export const SUMMARIZE_MERGE_RATE_LIMIT_MAX_ATTEMPTS =
-  SUMMARIZE_PIPELINE_STANDARD.mergeRateLimitMaxAttempts;
 export const GROQ_IMAGES_PER_REQUEST = 1;
 
 /**
@@ -34,27 +23,10 @@ export const GROQ_IMAGES_PER_REQUEST = 1;
  * Each chunk stays under maxSize to fit within API token limits.
  */
 /**
- * Removes consecutive duplicate paragraphs from text (e.g. from repetitive transcripts).
- * Keeps first occurrence of each unique paragraph.
+ * Removes consecutive duplicate paragraphs (e.g. repetitive transcripts or LLM summary points).
+ * Keeps first occurrence of each unique paragraph (by normalized content).
  */
 export function deduplicateParagraphs(text: string): string {
-  const paragraphs = text.split(/\n\n+/).map((p) => p.trim()).filter(Boolean);
-  const seen = new Set<string>();
-  const result: string[] = [];
-  for (const p of paragraphs) {
-    const key = p.toLowerCase().replace(/\s+/g, " ").slice(0, 200);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    result.push(p);
-  }
-  return result.join("\n\n");
-}
-
-/**
- * Removes duplicate or near-duplicate summary points from LLM output.
- * Keeps first occurrence of each unique point (by normalized content).
- */
-export function deduplicateSummaryPoints(text: string): string {
   if (!text.trim()) return text;
   const paragraphs = text.split(/\n\n+/).map((p) => p.trim()).filter(Boolean);
   const seen = new Set<string>();
@@ -293,8 +265,6 @@ ATURAN:
 - Pastikan rangkuman selesai LENGKAP; jangan potong di tengah kalimat atau paragraf.
 - Tanpa pembukaan lain, langsung rangkuman saja. Output akhir: tepat satu blok **Ringkasan Eksekutif**, satu blok **Rangkuman**, satu blok **Insight tambahan**. Tidak boleh ada pengulangan struktur ini.`;
 
-const MERGE_PROMPT = SUMMARIZE_MERGE_PROMPT;
-
 const MERGE_INTERMEDIATE_PROMPT = `Anda adalah asisten notulen. Tugas Anda adalah mengompres poin-poin berikut menjadi daftar ringkas.
 
 ATURAN:
@@ -333,9 +303,6 @@ export async function sleepChunkPacingFromGroqHeaders(
 
   if (remainingTokens < 1500) {
     const waitMs = resetTokensMs + 500;
-    console.log(
-      `>>> [CHUNK ${i + 1}/${total}] TPM low (${remainingTokens} remaining). Waiting ${waitMs}ms`
-    );
     await sleep(waitMs);
   } else {
     await sleep(300);
@@ -384,23 +351,14 @@ async function mergeSummariesOnce(
     const estimatedTokens =
       Math.round(combined.length / 3) + MERGE_PROMPT_OVERHEAD_TOKENS;
 
-    console.log(
-      `>>> [MERGE] Input: ${combined.length} chars (~${estimatedTokens} tokens estimated)`
-    );
-
     if (estimatedTokens <= SAFE_TOKEN_LIMIT) {
-      console.log(`>>> [MERGE] Single call (final).`);
       onProgress?.(1, 1);
-      const mergeStart = Date.now();
       const result = await summarizeWithGroq(combined, apiKey, {
-        systemPrompt: MERGE_PROMPT,
+        systemPrompt: SUMMARIZE_MERGE_PROMPT,
         maxTokens: 1500,
         glossary,
         pipeline,
       });
-      console.log(
-        `>>> [MERGE] Done in ${Date.now() - mergeStart}ms. Output: ${result.length} chars`
-      );
       return result;
     }
 
@@ -420,8 +378,6 @@ async function mergeSummariesOnce(
     }
     if (currentBatch.length > 0) batches.push(currentBatch);
 
-    console.log(`>>> [MERGE] Too large. Splitting into ${batches.length} batches.`);
-
     const batchResults: string[] = [];
     for (let i = 0; i < batches.length; i++) {
       const batchInput = batches[i]
@@ -429,10 +385,6 @@ async function mergeSummariesOnce(
         .join("\n\n");
 
       onProgress?.(i + 1, batches.length + 1);
-      console.log(
-        `>>> [MERGE BATCH ${i + 1}/${batches.length}] Input: ${batchInput.length} chars`
-      );
-      const mergeStart = Date.now();
 
       const result = await summarizeWithGroq(batchInput, apiKey, {
         systemPrompt: MERGE_INTERMEDIATE_PROMPT,
@@ -441,9 +393,6 @@ async function mergeSummariesOnce(
         pipeline,
       });
 
-      console.log(
-        `>>> [MERGE BATCH ${i + 1}/${batches.length}] Done in ${Date.now() - mergeStart}ms. Output: ${result.length} chars`
-      );
       batchResults.push(result);
 
       // Checkpoint after each batch
@@ -452,17 +401,10 @@ async function mergeSummariesOnce(
       }
 
       if (i < batches.length - 1) {
-        console.log(
-          `>>> [MERGE BATCH ${i + 1}/${batches.length}] Waiting 62000ms for TPM reset`
-        );
         await sleep(62000);
       }
     }
 
-    const totalBatchOutputChars = batchResults.reduce((sum, r) => sum + r.length, 0);
-    console.log(
-      `>>> [MERGE FINAL] Reducing ${batchResults.length} batch results. Total chars: ${totalBatchOutputChars}`
-    );
     onProgress?.(batches.length + 1, batches.length + 1);
     await sleep(62000);
     // Inner reduce rounds: no onBatchComplete — checkpoints only for outermost merge

@@ -2,25 +2,13 @@
 
 import type { SummarizeProgress } from "@/app/hooks/useSummarize";
 import { formatSize } from "@/app/components/FileUpload";
+import { formatElapsedTime } from "@/lib/format-time";
 
 type ProgressDisplayProps = {
   file: File;
   progress: SummarizeProgress;
   elapsedSeconds: number;
 };
-
-function formatElapsedTime(totalSec: number): string {
-  const s = Math.max(0, Math.floor(totalSec));
-  if (s < 3600) {
-    const m = Math.floor(s / 60);
-    const r = s % 60;
-    return `${String(m).padStart(2, "0")}:${String(r).padStart(2, "0")}`;
-  }
-  const h = Math.floor(s / 3600);
-  const m = Math.floor((s % 3600) / 60);
-  const r = s % 60;
-  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(r).padStart(2, "0")}`;
-}
 
 function activePhaseTab(phase: string): 1 | 2 | 3 {
   if (phase === "extracting" || phase === "transcribing") return 1;

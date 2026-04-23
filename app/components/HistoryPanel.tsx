@@ -5,11 +5,10 @@ import { createPortal } from "react-dom";
 import { RawResult } from "@/app/components/RawResult";
 import { SummaryMarkdownBody } from "@/app/components/SummaryMarkdownBody";
 import { useAuth } from "@/app/contexts/AuthContext";
-import { prepareContentForPdf, renderPdfContent } from "@/lib/export-pdf";
+import { buildJobPdf } from "@/lib/export-pdf";
 import { sanitizeTitleForFilename, signAndExportPdf } from "@/lib/sign-and-export-pdf";
 import { PassphraseModal } from "@/components/PassphraseModal";
 import type { SummaryJobItem } from "@/app/hooks/useHistory";
-import type jsPDF from "jspdf";
 
 type HistoryPanelProps = {
   historyJobs: SummaryJobItem[];
@@ -50,7 +49,7 @@ function TimingTooltip({ label, phases }: { label: string; phases: string }) {
       >
         {label}
       </span>
-      {visible && typeof window !== "undefined" && createPortal(
+      {visible && createPortal(
         <span
           style={{ top: coords.top, left: coords.left }}
           className="fixed z-[9999] px-3 py-2 bg-gray-900 text-white text-xs rounded-lg shadow-lg pointer-events-none"
@@ -69,6 +68,23 @@ function TimingTooltip({ label, phases }: { label: string; phases: string }) {
       )}
     </>
   );
+}
+
+type JobWithTotalDuration = SummaryJobItem & { totalDurationMs: number };
+
+function TimingLabel({ job }: { job: JobWithTotalDuration }) {
+  const totalSec = Math.floor(job.totalDurationMs / 1000);
+  const minutes = Math.floor(totalSec / 60);
+  const seconds = totalSec % 60;
+  const totalLabel = minutes > 0 ? `${minutes}m ${seconds}d` : `${seconds}d`;
+  const phases = [
+    job.transcribeDurationMs != null && `Transkripsi: ${Math.floor(job.transcribeDurationMs / 1000)}d`,
+    job.summarizeDurationMs != null && `Rangkum: ${Math.floor(job.summarizeDurationMs / 1000)}d`,
+    job.mergeDurationMs != null && `Gabung: ${Math.floor(job.mergeDurationMs / 1000)}d`,
+  ]
+    .filter(Boolean)
+    .join(" • ");
+  return <TimingTooltip label={`Selesai dalam ${totalLabel}`} phases={phases} />;
 }
 
 export function HistoryPanel({
@@ -110,63 +126,17 @@ export function HistoryPanel({
     return () => document.removeEventListener("keydown", onKey);
   }, [modal]);
 
-  const buildHistoryJobJsPdf = useCallback(
-    async (
-      text: string,
-      filename: string,
-      exportType: "transkrip" | "rangkuman" = "rangkuman"
-    ): Promise<jsPDF | null> => {
-      if (!text) return null;
-      const content = prepareContentForPdf(text);
-      const dateStr = new Date().toLocaleString("id-ID", {
-        day: "numeric",
-        month: "long",
-        year: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-      });
-      const { jsPDF } = await import("jspdf");
-      const doc = new jsPDF({ unit: "mm", format: "a4" });
-      const margin = 20;
-      const maxWidth = 210 - margin * 2;
-      const lineHeight = 6;
-      const paragraphSpacing = 4;
-      const headingSpacing = 2;
-      const pageHeight = 297;
-      const maxY = pageHeight - margin;
-
-      let y = margin;
-
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(10);
-      doc.setTextColor(100, 100, 100);
-
-      const headerMaxW = maxWidth - 20;
-      const titleText = `Dokumen: ${filename ?? "—"}`;
-      const titleLineCount = doc.splitTextToSize(titleText, headerMaxW).length;
-      doc.text(titleText, margin, y, { maxWidth: headerMaxW });
-      y += titleLineCount * lineHeight;
-
-      doc.text(`Tanggal dibuat: ${dateStr}`, margin, y);
-      y += lineHeight;
-      y += 4;
-
-      doc.setTextColor(0, 0, 0);
-      renderPdfContent(doc, content, {
-        margin,
-        maxWidth,
-        lineHeight,
-        paragraphSpacing,
-        headingSpacing,
-        maxY,
-        startY: y,
-        fontSize: 11,
-      });
-
-      return doc;
-    },
-    []
-  );
+  const buildExportDoc = useCallback(async () => {
+    if (!modal) return null;
+    const text =
+      modal.type === "rangkuman" ? modal.job.summaryText! : modal.job.sourceText!;
+    const doc = await buildJobPdf(text, modal.job.filename);
+    if (!doc) throw new Error("Tidak ada teks untuk diekspor.");
+    const fileStem = sanitizeTitleForFilename(modal.job.filename);
+    const outPdf =
+      modal.type === "transkrip" ? `transkrip-${fileStem}.pdf` : `rangkuman-${fileStem}.pdf`;
+    return { doc, outPdf };
+  }, [modal]);
 
   const onPassphraseExportConfirm = useCallback(
     async (passphrase: string) => {
@@ -181,15 +151,9 @@ export function HistoryPanel({
       }
       setIsLoading(true);
       try {
-        const text =
-          modal.type === "rangkuman" ? modal.job.summaryText! : modal.job.sourceText!;
-        const doc = await buildHistoryJobJsPdf(text, modal.job.filename, modal.type);
-        if (!doc) {
-          throw new Error("Tidak ada teks untuk diekspor.");
-        }
-        const fileStem = sanitizeTitleForFilename(modal.job.filename);
-        const outPdf =
-          modal.type === "transkrip" ? `transkrip-${fileStem}.pdf` : `rangkuman-${fileStem}.pdf`;
+        const payload = await buildExportDoc();
+        if (!payload) return;
+        const { doc, outPdf } = payload;
         await signAndExportPdf(doc, passphrase, user.id, outPdf);
         setIsModalOpen(false);
       } catch (e) {
@@ -200,7 +164,7 @@ export function HistoryPanel({
         setIsLoading(false);
       }
     },
-    [modal, user, buildHistoryJobJsPdf]
+    [modal, user, buildExportDoc]
   );
 
   const deleteHistoryJob = useCallback(
@@ -260,25 +224,7 @@ export function HistoryPanel({
                       >
                         {job.status === "completed"
                           ? job.totalDurationMs != null
-                            ? (() => {
-                                const totalSec = Math.floor(job.totalDurationMs / 1000);
-                                const minutes = Math.floor(totalSec / 60);
-                                const seconds = totalSec % 60;
-                                const totalLabel = minutes > 0
-                                  ? `${minutes}m ${seconds}d`
-                                  : `${seconds}d`;
-                                const phases = [
-                                  job.transcribeDurationMs != null && `Transkripsi: ${Math.floor(job.transcribeDurationMs / 1000)}d`,
-                                  job.summarizeDurationMs != null && `Rangkum: ${Math.floor(job.summarizeDurationMs / 1000)}d`,
-                                  job.mergeDurationMs != null && `Gabung: ${Math.floor(job.mergeDurationMs / 1000)}d`,
-                                ].filter(Boolean).join(" • ");
-                                return (
-                                  <TimingTooltip
-                                    label={`Selesai dalam ${totalLabel}`}
-                                    phases={phases}
-                                  />
-                                );
-                              })()
+                            ? <TimingLabel job={job as JobWithTotalDuration} />
                             : "Selesai"
                           : job.status === "failed"
                             ? "Gagal"
@@ -295,16 +241,14 @@ export function HistoryPanel({
                     </div>
                     <div className="flex items-center gap-2 flex-wrap">
                       {job.isResumable && (
-                        <>
-                          <button
-                            type="button"
-                            onClick={() => onResumeJob(job)}
-                            disabled={!!resumeLoading}
-                            className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:opacity-90 disabled:opacity-50"
-                          >
-                            {resumeLoading === job.id ? "Melanjutkan…" : "Lanjutkan"}
-                          </button>
-                        </>
+                        <button
+                          type="button"
+                          onClick={() => onResumeJob(job)}
+                          disabled={!!resumeLoading}
+                          className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:opacity-90 disabled:opacity-50"
+                        >
+                          {resumeLoading === job.id ? "Melanjutkan…" : "Lanjutkan"}
+                        </button>
                       )}
                       {job.sourceText?.trim() && (
                         <button
@@ -379,26 +323,9 @@ export function HistoryPanel({
                         return;
                       }
                       if (user.isAdmin) {
-                        if (!modal) return;
                         setIsLoading(true);
                         try {
-                          const text =
-                            modal.type === "rangkuman"
-                              ? modal.job.summaryText!
-                              : modal.job.sourceText!;
-                          const doc = await buildHistoryJobJsPdf(
-                            text,
-                            modal.job.filename,
-                            modal.type
-                          );
-                          if (!doc) {
-                            throw new Error("Tidak ada teks untuk diekspor.");
-                          }
-                          const fileStem = sanitizeTitleForFilename(modal.job.filename);
-                          const outPdf =
-                            modal.type === "transkrip"
-                              ? `transkrip-${fileStem}.pdf`
-                              : `rangkuman-${fileStem}.pdf`;
+                          const { doc, outPdf } = (await buildExportDoc())!;
                           doc.save(outPdf);
                         } catch (e) {
                           const msg =

@@ -31,6 +31,9 @@ export function useGroqApiKey() {
   const updateKey = useCallback((key: string) => {
     setGroqApiKey(key);
     if (key.trim()) saveGroqApiKeyToCache(key);
+    else if (typeof window !== "undefined") {
+      sessionStorage.removeItem(GROQ_API_KEY_CACHE_KEY);
+    }
   }, []);
 
   return { groqApiKey, setGroqApiKey: updateKey };

@@ -1,10 +1,19 @@
 # syntax=docker/dockerfile:1
-# Debian slim: glibc matches ffmpeg-static / @ffprobe-installer (audio chunking) and @napi-rs/canvas.
-FROM node:20-bookworm-slim AS base
+FROM node:20-alpine AS base
 
 FROM base AS deps
 WORKDIR /app
-COPY package.json package-lock.json* ./
+# Install build dependencies for native modules (@napi-rs/canvas needs cairo/pango)
+RUN apk add --no-cache \
+    python3 \
+    make \
+    g++ \
+    cairo-dev \
+    pango-dev \
+    jpeg-dev \
+    giflib-dev \
+    librsvg-dev
+COPY package.json package-lock.json ./
 COPY prisma ./prisma
 RUN --mount=type=cache,target=/root/.npm \
     npm config set fetch-retries 5 \
@@ -23,14 +32,20 @@ FROM base AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
-# CLI for `db push` on startup (no migrations folder — schema sync only). Avoids apt; fits restrictive corporate proxies.
-RUN npm install -g prisma@6.19.2
+# ffmpeg for audio chunking + runtime libs for @napi-rs/canvas
+RUN apk add --no-cache \
+    ffmpeg \
+    cairo \
+    pango \
+    jpeg \
+    giflib \
+    librsvg
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 COPY --from=builder /app/prisma ./prisma
-RUN mkdir -p /app/data
+COPY --from=deps /app/node_modules ./node_modules
 EXPOSE 3000
 ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
-CMD ["sh", "-c", "prisma db push --skip-generate && node server.js"]
+CMD ["sh", "-c", "node_modules/.bin/prisma migrate deploy && node server.js"]

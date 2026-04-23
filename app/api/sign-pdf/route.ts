@@ -68,8 +68,7 @@ function postHttpsBuffer(
         res.on("error", reject);
       }
     );
-    const timeoutMs = 120_000;
-    req.setTimeout(timeoutMs, () => {
+    req.setTimeout(120_000, () => {
       req.destroy(new Error("Request timeout"));
     });
     req.on("error", reject);
@@ -80,17 +79,11 @@ function postHttpsBuffer(
 
 const GENERIC_ERROR = "Terjadi kesalahan.";
 
-type PusdatinSignResponse =
-  | { success: true; file: string }
-  | { success: false; msg?: string }
-  | Record<string, unknown>;
-
-function tryParsePusdatinJson(text: string): PusdatinSignResponse | null {
-  try {
-    return JSON.parse(text) as PusdatinSignResponse;
-  } catch {
-    return null;
-  }
+/** Residual error after the happy path; `success: true` here means no usable file. */
+function extractPusdatinErrorMessage(json: object): string {
+  if ("success" in json && json.success === true) return GENERIC_ERROR;
+  const msg = (json as { msg?: unknown }).msg;
+  return typeof msg === "string" && msg.trim() ? msg : GENERIC_ERROR;
 }
 
 export async function POST(request: NextRequest) {
@@ -131,8 +124,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Berkas PDF wajib diunggah." }, { status: 400 });
   }
 
-  const lower = file.name.toLowerCase();
-  const isPdf = file.type === "application/pdf" || lower.endsWith(".pdf");
+  const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
   if (!isPdf) {
     return NextResponse.json({ error: "Hanya berkas PDF yang didukung." }, { status: 400 });
   }
@@ -151,47 +143,39 @@ export async function POST(request: NextRequest) {
     }
   );
 
-  const upstreamHeaders: Record<string, string> = {
-    Authorization: `Bearer ${bearer}`,
-    "Content-Type": `multipart/form-data; boundary=${boundary}`,
-  };
-
-  let statusCode: number;
   let text: string;
   try {
-    const r = await postHttpsBuffer(TTE_SIGN_URL, body, upstreamHeaders);
-    statusCode = r.statusCode;
-    text = r.text;
+    text = (
+      await postHttpsBuffer(TTE_SIGN_URL, body, {
+        Authorization: `Bearer ${bearer}`,
+        "Content-Type": `multipart/form-data; boundary=${boundary}`,
+      })
+    ).text;
   } catch (e) {
     console.error("sign-pdf upstream:", e);
     return NextResponse.json({ error: GENERIC_ERROR }, { status: 400 });
   }
 
-  const json = tryParsePusdatinJson(text);
-  if (!json) {
+  const json: unknown = (() => {
+    try {
+      return JSON.parse(text) as unknown;
+    } catch {
+      return null;
+    }
+  })();
+  if (json === null || typeof json !== "object") {
     return NextResponse.json({ error: GENERIC_ERROR }, { status: 400 });
   }
 
   if ("success" in json && json.success === true) {
-    const withFile = json as { success: true; file: unknown };
-    if (typeof withFile.file === "string" && withFile.file.length > 0) {
-      return NextResponse.json({ file: withFile.file });
+    const f = (json as { success: true; file: unknown }).file;
+    if (typeof f === "string" && f.length > 0) {
+      return NextResponse.json({ file: f });
     }
-    return NextResponse.json({ error: GENERIC_ERROR }, { status: 400 });
   }
 
-  if ("success" in json && json.success === false) {
-    const err = (json as { success: false; msg?: string }).msg;
-    return NextResponse.json(
-      { error: typeof err === "string" && err.trim() ? err : GENERIC_ERROR },
-      { status: 400 }
-    );
-  }
-
-  if (statusCode >= 400) {
-    const msg = typeof (json as { msg?: string }).msg === "string" ? (json as { msg: string }).msg : null;
-    return NextResponse.json({ error: msg?.trim() ? msg : GENERIC_ERROR }, { status: 400 });
-  }
-
-  return NextResponse.json({ error: GENERIC_ERROR }, { status: 400 });
+  return NextResponse.json(
+    { error: extractPusdatinErrorMessage(json) },
+    { status: 400 }
+  );
 }

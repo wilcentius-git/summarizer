@@ -98,13 +98,8 @@ async function transcribeSingleChunk(
   options: { language?: string; fileName: string; prompt?: string }
 ): Promise<string> {
   const fileName = options.fileName;
-  const mime =
-    fileName.endsWith(".wav") ? "audio/wav" :
-    fileName.endsWith(".m4a") ? "audio/mp4" :
-    fileName.endsWith(".flac") ? "audio/flac" :
-    fileName.endsWith(".ogg") ? "audio/ogg" :
-    fileName.endsWith(".webm") ? "audio/webm" :
-    "audio/mpeg";
+  const ext = fileName.toLowerCase().slice(fileName.lastIndexOf("."));
+  const mime = EXT_TO_MIME[ext] ?? "audio/mpeg";
 
   const formData = new FormData();
   const blob = new Blob([new Uint8Array(buffer)], { type: mime });
@@ -120,10 +115,9 @@ async function transcribeSingleChunk(
 
   let lastError: Error | null = null;
   const maxAttempts = Math.max(WHISPER_RETRY_ATTEMPTS, WHISPER_RATE_LIMIT_RETRY_ATTEMPTS);
+  const WHISPER_TIMEOUT_MS = 30_000;
   for (let attempt = 0; attempt <= maxAttempts; attempt++) {
     try {
-      const WHISPER_TIMEOUT_MS = 30_000;
-
       const controller = new AbortController();
       const timeoutId = setTimeout(() => {
         controller.abort();
@@ -150,9 +144,6 @@ async function transcribeSingleChunk(
           // Treat timeout as a retryable network error
           lastError = new Error(`Whisper chunk timed out after ${WHISPER_TIMEOUT_MS}ms`);
           if (attempt < maxAttempts) {
-            console.log(
-              `>>> [WHISPER] Timeout on attempt ${attempt + 1}. Retrying after ${WHISPER_RETRY_DELAY_MS}ms...`
-            );
             await sleep(WHISPER_RETRY_DELAY_MS);
             continue;
           }
@@ -262,10 +253,6 @@ export async function transcribeWithGroq(
         throw new TranscribeCancelledError(transcripts);
       }
       const chunk = chunks[i];
-      console.log(
-        `>>> [WHISPER ${i + 1}/${total}] Starting. Chunk size: ${chunk.buffer.length} bytes`
-      );
-      const whisperStart = Date.now();
       options?.onChunkProgress?.(i + 1, total);
       const chunkFileName =
         chunks.length > 1 ? `chunk-${i + 1}.mp3` : fileName;
@@ -274,14 +261,11 @@ export async function transcribeWithGroq(
         fileName: chunkFileName,
         prompt: options?.prompt,
       });
-      console.log(`>>> [WHISPER ${i + 1}/${total}] Done in ${Date.now() - whisperStart}ms`);
-      console.log(`>>> [WHISPER ${i + 1}/${total}] Transcript length: ${text.length} chars`);
       if (text.trim()) {
         transcripts.push(text.trim());
       }
       await options?.onChunkDone?.(i + 1, text.trim(), [...transcripts]);
       if (i < chunks.length - 1) {
-        console.log(`>>> [WHISPER ${i + 1}/${total}] Sleeping ${chunkDelayMs}ms`);
         await sleep(chunkDelayMs);
       }
     }

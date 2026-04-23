@@ -1,13 +1,6 @@
 "use client";
 
-function sanitizeRawText(s: string): string {
-  if (!s) return s;
-  return s
-    .replace(/\r\n/g, "\n")
-    .replace(/\r/g, "\n")
-    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, "")
-    .replace(/\n{3,}/g, "\n\n");
-}
+import { sanitizeMultilineText } from "@/lib/text-utils";
 
 export type RawResultProps = {
   /** e.g. "Transkrip mentah" (audio) or "Teks sumber" (document) */
@@ -19,11 +12,11 @@ export type RawResultProps = {
 };
 
 export function RawResult({ label, text, className = "", isPreviewOnly = false }: RawResultProps) {
-  const safe = sanitizeRawText(text);
+  const safe = sanitizeMultilineText(text);
 
   return (
     <section className={`text-left ${className}`.trim()}>
-      <h3 className="text-sm font-semibold text-kemenkum-blue mb-2">{label}</h3>
+      {label && <h3 className="text-sm font-semibold text-kemenkum-blue mb-2">{label}</h3>}
       <pre
         tabIndex={isPreviewOnly ? 0 : undefined}
         aria-readonly={isPreviewOnly ? "true" : undefined}

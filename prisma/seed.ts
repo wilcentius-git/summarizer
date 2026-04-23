@@ -7,13 +7,17 @@ async function hashPassword(password: string): Promise<string> {
   return bcrypt.hash(password, 12);
 }
 
+const adminPassword = process.env.SEED_ADMIN_PASSWORD;
+if (!adminPassword) {
+  throw new Error("SEED_ADMIN_PASSWORD environment variable is not set");
+}
+
 const admins = [
   {
     nip: "admin",
-    password: "ganti-password-ini",
+    password: adminPassword,
     displayName: "Administrator",
   },
-  // Add more admin users here if needed
 ];
 
 async function main() {

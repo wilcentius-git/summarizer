@@ -3,6 +3,26 @@ import { cookies } from "next/headers";
 
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import * as fs from "fs";
+import { verifyToken } from "@/lib/auth";
+import {
+  deduplicateParagraphs,
+  isGroqRateLimitError,
+  mergeSummaries,
+  sleepChunkPacingFromGroqHeaders,
+  splitIntoChunks,
+  summarizeWithGroq,
+  SUMMARIZE_PIPELINE_STANDARD,
+  type SummarizePipelineConfig,
+} from "@/lib/groq";
+import { isJobCancelled } from "@/lib/check-cancelled";
+import {
+  TranscribeCancelledError,
+  transcribeWithGroq,
+} from "@/lib/transcribe-audio";
+import { audioExists, deleteAudio } from "@/lib/audio-storage";
+import { truncateSummarySections } from "@/lib/summary-format";
+import { resolveGroqApiKey } from "@/lib/resolve-groq-api-key";
 
 /** Job with fields needed for resume (Prisma client may be out of sync with schema). */
 type ResumableJob = {
@@ -19,27 +39,6 @@ type ResumableJob = {
   processedTranscribeChunks?: number;
   audioPath?: string | null;
 };
-import * as fs from "fs";
-import { verifyToken } from "@/lib/auth";
-import {
-  deduplicateSummaryPoints,
-  isGroqRateLimitError,
-  mergeSummaries,
-  sleepChunkPacingFromGroqHeaders,
-  splitIntoChunks,
-  summarizeWithGroq,
-  SUMMARIZE_PIPELINE_STANDARD,
-  type SummarizePipelineConfig,
-} from "@/lib/groq";
-import { isJobCancelled } from "@/lib/check-cancelled";
-import {
-  TranscribeCancelledError,
-  transcribeWithGroq,
-} from "@/lib/transcribe-audio";
-import { audioExists, deleteAudio } from "@/lib/audio-storage";
-import { deduplicateParagraphs } from "@/lib/groq";
-import { truncateSummarySections } from "@/lib/summary-format";
-import { resolveGroqApiKey } from "@/lib/resolve-groq-api-key";
 
 /** Allow long-running summarization. */
 export const maxDuration = 7200;
@@ -279,9 +278,6 @@ export async function POST(
                 },
               });
               transcribeEndMs = Date.now();
-              console.log(
-                `>>> [TIMING] Transcription done in ${transcribeEndMs - transcribeStartMs!}ms`
-              );
             } catch (transcribeErr) {
               if (transcribeErr instanceof TranscribeCancelledError) {
                 controller.close();
@@ -330,10 +326,7 @@ export async function POST(
               summarizeStartMs = Date.now();
               const summary = await summarizeWithGroq(finalText, apiKey);
               summarizeEndMs = Date.now();
-              console.log(
-                `>>> [TIMING] Summarization done in ${summarizeEndMs - summarizeStartMs!}ms`
-              );
-              let finalSummary = deduplicateSummaryPoints(summary || "Rangkuman tidak dapat dibuat.");
+              let finalSummary = deduplicateParagraphs(summary || "Rangkuman tidak dapat dibuat.");
               finalSummary = truncateSummarySections(finalSummary, 40);
               await updateJob({
                 status: "completed",
@@ -387,8 +380,6 @@ export async function POST(
               });
 
               const accumulatedSummaries = [...initialSummaries];
-              const jobStart = Date.now();
-              const delayMs = pipeline.summarizeChunkDelayMs;
               summarizeStartMs = Date.now();
               for (let i = startFromChunk; i < chunks.length; i++) {
                 if (await isJobCancelled(jobId)) {
@@ -396,8 +387,6 @@ export async function POST(
                   return;
                 }
                 const chunk = chunks[i];
-                const chunkStart = Date.now();
-                console.log(`[CHUNK ${i + 1}/${total}] Starting. Text length: ${chunk.length} chars`);
 
                 const { content: part, headers: responseHeaders } = await summarizeWithGroq(
                   chunk,
@@ -408,11 +397,6 @@ export async function POST(
                     returnHeaders: true,
                   }
                 );
-                const result = part;
-                console.log(
-                  `>>> [CHUNK ${i + 1}/${total}] Summary length: ${result.length} chars (~${Math.round(result.length / 4)} tokens)`
-                );
-                console.log(`[CHUNK ${i + 1}/${total}] Done in ${Date.now() - chunkStart}ms`);
                 accumulatedSummaries.push(part);
                 await updateJob({
                   processedChunks: i + 1,
@@ -428,18 +412,11 @@ export async function POST(
                   stepLabel: "Rangkuman",
                 });
                 if (i < chunks.length - 1) {
-                  console.log(`[CHUNK ${i + 1}/${total}] Sleeping ${delayMs}ms`);
                   await sleepChunkPacingFromGroqHeaders(responseHeaders, i, total);
-                  console.log(
-                    `[CHUNK ${i + 1}/${total}] Sleep done. Total elapsed: ${Date.now() - jobStart}ms`
-                  );
                 }
               }
 
               summarizeEndMs = Date.now();
-              console.log(
-                `>>> [TIMING] Summarization done in ${summarizeEndMs - summarizeStartMs!}ms`
-              );
 
               if (await isJobCancelled(jobId)) {
                 controller.close();
@@ -463,9 +440,6 @@ export async function POST(
                     parsed.batchResults.length > 0
                   ) {
                     // Merge was interrupted — resume from saved batch results
-                    console.log(
-                      `>>> [MERGE RESUME] Found ${parsed.batchResults.length} saved batch results. Resuming merge from checkpoint.`
-                    );
                     mergeStartSummaries = parsed.batchResults;
                   }
                 } catch {
@@ -482,9 +456,6 @@ export async function POST(
                 step: isAudioJob ? 2 : 1,
                 stepLabel: "Gabung",
               });
-              console.log(
-                `>>> [MERGE] Phase starting. Total chunks: ${accumulatedSummaries.length}`
-              );
               mergeStartMs = Date.now();
               const summary = await mergeSummaries(mergeStartSummaries, apiKey, {
                 onProgress: (cur, tot) => {
@@ -509,14 +480,10 @@ export async function POST(
                       batchResults,
                     }),
                   });
-                  console.log(
-                    `>>> [MERGE CHECKPOINT] Saved ${batchResults.length} batch results to DB`
-                  );
                 },
               });
               mergeEndMs = Date.now();
-              console.log(`>>> [TIMING] Merge done in ${mergeEndMs - mergeStartMs!}ms`);
-              let finalSummary = deduplicateSummaryPoints(summary || "Rangkuman tidak dapat dibuat.");
+              let finalSummary = deduplicateParagraphs(summary || "Rangkuman tidak dapat dibuat.");
               finalSummary = truncateSummarySections(finalSummary, 40);
               await updateJob({
                 status: "completed",

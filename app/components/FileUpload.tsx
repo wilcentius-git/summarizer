@@ -12,16 +12,10 @@ const ACCEPTED_FILE_TYPES =
 
 const DOCUMENT_EXTENSIONS = [".pdf", ".docx", ".doc", ".txt", ".rtf", ".odt", ".srt"];
 const AUDIO_EXTENSIONS = [".mp3", ".mp4", ".mpeg", ".mpga", ".m4a", ".wav", ".webm", ".flac", ".ogg"];
+const ALL_EXTENSIONS = [...DOCUMENT_EXTENSIONS, ...AUDIO_EXTENSIONS];
+const AUDIO_EXTENSION_SET = new Set(AUDIO_EXTENSIONS);
 
-const SUPPORTED_MIME_TYPES = new Set([
-  "application/pdf",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  "application/msword",
-  "text/plain",
-  "application/rtf",
-  "text/rtf",
-  "application/vnd.oasis.opendocument.text",
-  "application/x-subrip",
+const AUDIO_MIME_TYPES = new Set([
   "audio/mpeg",
   "audio/mp3",
   "audio/mp4",
@@ -32,19 +26,33 @@ const SUPPORTED_MIME_TYPES = new Set([
   "audio/ogg",
 ]);
 
+const DOCUMENT_MIME_TYPES = [
+  "application/pdf",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/msword",
+  "text/plain",
+  "application/rtf",
+  "text/rtf",
+  "application/vnd.oasis.opendocument.text",
+  "application/x-subrip",
+] as const;
+
+const SUPPORTED_MIME_TYPES = new Set([...DOCUMENT_MIME_TYPES, ...AUDIO_MIME_TYPES]);
+
+const getExt = (name: string) => name.toLowerCase().slice(name.lastIndexOf("."));
+
 function isSupportedFile(file: File): boolean {
   if (SUPPORTED_MIME_TYPES.has(file.type)) return true;
   if (file.type === "application/octet-stream" || !file.type) {
-    const ext = file.name.toLowerCase().slice(file.name.lastIndexOf("."));
-    return [...DOCUMENT_EXTENSIONS, ...AUDIO_EXTENSIONS].includes(ext);
+    const ext = getExt(file.name);
+    return ALL_EXTENSIONS.includes(ext);
   }
   return false;
 }
 
 export function isAudioFile(file: File): boolean {
-  if (["audio/mpeg", "audio/mp3", "audio/mp4", "audio/mpga", "audio/wav", "audio/webm", "audio/flac", "audio/ogg"].includes(file.type)) return true;
-  const ext = file.name.toLowerCase().slice(file.name.lastIndexOf("."));
-  return AUDIO_EXTENSIONS.includes(ext);
+  if (AUDIO_MIME_TYPES.has(file.type)) return true;
+  return AUDIO_EXTENSION_SET.has(getExt(file.name));
 }
 
 export type FileItem = {
@@ -87,15 +95,16 @@ export function useFileUpload(setError: (err: string | null) => void) {
         );
         continue;
       }
-      const maxSize = isAudioFile(file) ? MAX_AUDIO_SIZE_BYTES : MAX_FILE_SIZE_BYTES;
-      const maxSizeMB = isAudioFile(file) ? MAX_AUDIO_SIZE_MB : MAX_FILE_SIZE_MB;
+      const isAudio = isAudioFile(file);
+      const maxSize = isAudio ? MAX_AUDIO_SIZE_BYTES : MAX_FILE_SIZE_BYTES;
+      const maxSizeMB = isAudio ? MAX_AUDIO_SIZE_MB : MAX_FILE_SIZE_MB;
       if (file.size > maxSize) {
-        setError(`File ${file.name} exceeds ${maxSizeMB} MB${isAudioFile(file) ? " (audio limit)" : ""}.`);
+        setError(`File ${file.name} exceeds ${maxSizeMB} MB${isAudio ? " (audio limit)" : ""}.`);
         continue;
       }
       const id = `${file.name}-${file.size}-${Date.now()}-${i}`;
       added.push({ id, file, name: file.name, size: file.size });
-      if (isAudioFile(file)) {
+      if (isAudio) {
         getAudioDurationInBrowser(file)
           .then((duration) => {
             setFiles((prev) =>

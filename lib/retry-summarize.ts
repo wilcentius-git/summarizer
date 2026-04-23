@@ -6,15 +6,14 @@
 import type { SummaryJob } from "@prisma/client";
 
 import {
-  deduplicateSummaryPoints,
+  deduplicateParagraphs,
   isGroqRateLimitError,
   mergeSummaries,
   sleep,
   sleepChunkPacingFromGroqHeaders,
-  SUMMARIZE_CHUNK_SIZE,
-  SUMMARIZE_MERGE_PRE_DELAY_MS,
   splitIntoChunks,
   summarizeWithGroq,
+  SUMMARIZE_PIPELINE_STANDARD,
 } from "@/lib/groq";
 import { truncateSummarySections } from "@/lib/summary-format";
 
@@ -39,7 +38,7 @@ export async function processRateLimitedJob(
 
   try {
     let summary: string;
-    if (text.length <= SUMMARIZE_CHUNK_SIZE) {
+    if (text.length <= SUMMARIZE_PIPELINE_STANDARD.summarizeChunkSize) {
       summary = await summarizeWithGroq(text, apiKey);
     } else {
       let initialSummaries: string[] = [];
@@ -51,7 +50,7 @@ export async function processRateLimitedJob(
         }
       }
       const startFromChunk = job.processedChunks ?? 0;
-      const chunks = splitIntoChunks(text, SUMMARIZE_CHUNK_SIZE);
+      const chunks = splitIntoChunks(text, SUMMARIZE_PIPELINE_STANDARD.summarizeChunkSize);
       const chunkSummaries = [...initialSummaries];
       for (let i = startFromChunk; i < chunks.length; i++) {
         const { content: part, headers: responseHeaders } = await summarizeWithGroq(
@@ -63,17 +62,13 @@ export async function processRateLimitedJob(
             returnHeaders: true,
           }
         );
-        const result = part;
-        console.log(
-          `>>> [CHUNK ${i + 1}/${chunks.length}] Summary length: ${result.length} chars (~${Math.round(result.length / 4)} tokens)`
-        );
         chunkSummaries.push(part);
         await sleepChunkPacingFromGroqHeaders(responseHeaders, i, chunks.length);
       }
-      await sleep(SUMMARIZE_MERGE_PRE_DELAY_MS);
+      await sleep(SUMMARIZE_PIPELINE_STANDARD.mergePreDelayMs);
       summary = await mergeSummaries(chunkSummaries, apiKey);
     }
-    summary = deduplicateSummaryPoints(summary || "Rangkuman tidak dapat dibuat.");
+    summary = deduplicateParagraphs(summary || "Rangkuman tidak dapat dibuat.");
     summary = truncateSummarySections(summary, 40);
     return { success: true, summary };
   } catch (err) {

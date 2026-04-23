@@ -9,6 +9,8 @@ services:
     environment:
       NODE_ENV: production
       DATABASE_URL: postgresql://summarizer_user:changeme@db:5432/summarizer_db
+      FFMPEG_PATH: /usr/bin/ffmpeg
+      FFPROBE_PATH: /usr/bin/ffprobe
     volumes:
       - summarizer-uploads:/app/uploads/jobs
     depends_on:

@@ -4,19 +4,11 @@ import { useCallback, useState } from "react";
 import { RawResult } from "@/app/components/RawResult";
 import { SummaryMarkdownBody } from "@/app/components/SummaryMarkdownBody";
 import { useAuth } from "@/app/contexts/AuthContext";
-import { prepareContentForPdf, renderPdfContent } from "@/lib/export-pdf";
+import { buildJobPdf } from "@/lib/export-pdf";
+import { formatElapsedTime } from "@/lib/format-time";
 import { sanitizeTitleForFilename, signAndExportPdf } from "@/lib/sign-and-export-pdf";
 import { PassphraseModal } from "@/components/PassphraseModal";
 import type jsPDF from "jspdf";
-
-function formatElapsedTime(seconds: number): string {
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  const s = Math.floor(seconds % 60);
-  const pad = (n: number) => n.toString().padStart(2, "0");
-  if (h >= 1) return `${pad(h)}:${pad(m)}:${pad(s)}`;
-  return `${pad(m)}:${pad(s)}`;
-}
 
 type SummaryResultProps = {
   summary: {
@@ -43,59 +35,27 @@ export function SummaryResultPanel({ summary }: SummaryResultProps) {
     setTimeout(() => setCopyFeedback(false), 2000);
   }, [summary.text]);
 
-  const buildSummaryJsPdf = useCallback(async (): Promise<jsPDF | null> => {
-    if (!summary.text) return null;
-
-    const dateStr = new Date().toLocaleString("id-ID", {
-      day: "numeric",
-      month: "long",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-
-    const content = prepareContentForPdf(summary.text);
-
-    const { jsPDF } = await import("jspdf");
-    const doc = new jsPDF({ unit: "mm", format: "a4" });
-    const margin = 20;
-    const maxWidth = 210 - margin * 2;
-    const lineHeight = 6;
-    const paragraphSpacing = 4;
-    const headingSpacing = 2;
-    const pageHeight = 297;
-    const maxY = pageHeight - margin;
-
-    let y = margin;
-
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(10);
-    doc.setTextColor(100, 100, 100);
-
-    const headerMaxW = maxWidth - 20;
-    const titleText = `Dokumen: ${summary.fileName ?? "—"}`;
-    const titleLineCount = doc.splitTextToSize(titleText, headerMaxW).length;
-    doc.text(titleText, margin, y, { maxWidth: headerMaxW });
-    y += titleLineCount * lineHeight;
-
-    doc.text(`Tanggal dibuat: ${dateStr}`, margin, y);
-    y += lineHeight;
-    y += 4;
-
-    doc.setTextColor(0, 0, 0);
-    renderPdfContent(doc, content, {
-      margin,
-      maxWidth,
-      lineHeight,
-      paragraphSpacing,
-      headingSpacing,
-      maxY,
-      startY: y,
-      fontSize: 11,
-    });
-
-    return doc;
-  }, [summary.text, summary.fileName]);
+  const handleExport = useCallback(
+    async (save: (doc: jsPDF, filename: string) => void | Promise<void>) => {
+      setIsLoading(true);
+      try {
+        const doc = await buildJobPdf(summary.text, summary.fileName);
+        if (!doc) {
+          throw new Error("Tidak ada teks untuk diekspor.");
+        }
+        const fileStem = sanitizeTitleForFilename(summary.fileName);
+        const filename = `rangkuman-${fileStem}.pdf`;
+        await Promise.resolve(save(doc, filename));
+        setIsModalOpen(false);
+      } catch (e) {
+        window.alert(e instanceof Error ? e.message : "Gagal mengekspor PDF. Coba lagi.");
+        console.error(e);
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [summary.text, summary.fileName]
+  );
 
   const onPassphraseConfirm = useCallback(
     async (passphrase: string) => {
@@ -104,24 +64,9 @@ export function SummaryResultPanel({ summary }: SummaryResultProps) {
         setIsModalOpen(false);
         return;
       }
-      setIsLoading(true);
-      try {
-        const doc = await buildSummaryJsPdf();
-        if (!doc) {
-          throw new Error("Tidak ada teks untuk diekspor.");
-        }
-        const fileStem = sanitizeTitleForFilename(summary.fileName);
-        await signAndExportPdf(doc, passphrase, user.id, `rangkuman-${fileStem}.pdf`);
-        setIsModalOpen(false);
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : "Gagal mengekspor PDF. Coba lagi.";
-        window.alert(msg);
-        console.error(e);
-      } finally {
-        setIsLoading(false);
-      }
+      await handleExport((doc, filename) => signAndExportPdf(doc, passphrase, user.id, filename));
     },
-    [user, buildSummaryJsPdf, summary.fileName]
+    [user, handleExport]
   );
 
   return (
@@ -146,21 +91,9 @@ export function SummaryResultPanel({ summary }: SummaryResultProps) {
                 return;
               }
               if (user.isAdmin) {
-                setIsLoading(true);
-                try {
-                  const doc = await buildSummaryJsPdf();
-                  if (!doc) {
-                    throw new Error("Tidak ada teks untuk diekspor.");
-                  }
-                  const fileStem = sanitizeTitleForFilename(summary.fileName);
-                  doc.save(`rangkuman-${fileStem}.pdf`);
-                } catch (e) {
-                  const msg = e instanceof Error ? e.message : "Gagal mengekspor PDF. Coba lagi.";
-                  window.alert(msg);
-                  console.error(e);
-                } finally {
-                  setIsLoading(false);
-                }
+                await handleExport((doc, filename) => {
+                  doc.save(filename);
+                });
                 return;
               }
               setPassphraseModalKey((k) => k + 1);
@@ -174,7 +107,7 @@ export function SummaryResultPanel({ summary }: SummaryResultProps) {
       </div>
       {summary.elapsedSeconds != null && (
         <p className="text-sm text-gray-500 mb-2 text-left">
-          Proses selesai dalam {formatElapsedTime(summary.elapsedSeconds ?? 0)}.
+          Proses selesai dalam {formatElapsedTime(summary.elapsedSeconds)}.
         </p>
       )}
       {summary.sourceText?.trim() && (

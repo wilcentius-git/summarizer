@@ -12,16 +12,7 @@ import { useFileUpload, formatSize } from "@/app/components/FileUpload";
 import { ProgressDisplay } from "@/app/components/ProgressDisplay";
 import { HistoryPanel } from "@/app/components/HistoryPanel";
 import { RawResult } from "@/app/components/RawResult";
-
-function syntheticFileFromHistoryJob(filename: string, fileType: string): File {
-  const mime =
-    fileType === "pdf"
-      ? "application/pdf"
-      : fileType === "docx"
-        ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-        : "audio/mpeg";
-  return new File([], filename, { type: mime });
-}
+import { ResumeCard } from "@/app/components/ResumeCard";
 
 export default function Home() {
   const { user, logout } = useAuth();
@@ -66,6 +57,11 @@ export default function Home() {
     },
     [handleResumeJob]
   );
+
+  const resumingJob =
+    resumeLoading && resumeProgress
+      ? historyJobs.find((j) => j.id === resumeLoading)
+      : undefined;
 
   return (
     <main className="min-h-screen bg-kemenkum-blue py-8 px-4 flex justify-center items-center overflow-y-auto">
@@ -178,33 +174,16 @@ export default function Home() {
           </div>
         )}
 
-        {resumeLoading && resumeProgress && (() => {
-          const resumingJob = historyJobs.find((j) => j.id === resumeLoading);
-          if (!resumingJob) return null;
-          return (
-            <section ref={resumeCardRef} className="mt-8 text-center min-w-0">
-              <div className="flex flex-col gap-3 p-3 rounded-lg border border-gray-200 bg-white shadow-sm overflow-hidden">
-                <div className="flex items-center justify-between gap-2 min-w-0">
-                  <div className="min-w-0 flex-1 text-center sm:text-left">
-                    <p className="font-medium text-gray-900 truncate">{resumingJob.filename}</p>
-                    <p className="text-sm text-gray-500">Dari Riwayat Unggahan</p>
-                  </div>
-                </div>
-                <div className="w-full min-w-0">
-                  <ProgressDisplay
-                    file={syntheticFileFromHistoryJob(resumingJob.filename, resumingJob.fileType)}
-                    progress={resumeProgress}
-                    elapsedSeconds={resumeElapsedSeconds}
-                  />
-                </div>
-                <div className="flex flex-wrap items-center gap-2 justify-end min-w-0">
-                  <button type="button" onClick={pauseResume} className="px-4 py-2 rounded-lg border border-amber-300 text-amber-700 text-sm font-medium hover:bg-amber-50 whitespace-nowrap">Jeda</button>
-                  <button type="button" onClick={abortResume} className="px-4 py-2 rounded-lg border border-rose-300 text-rose-700 text-sm font-medium hover:bg-rose-50 whitespace-nowrap">Batalkan</button>
-                </div>
-              </div>
-            </section>
-          );
-        })()}
+        {resumingJob && resumeProgress && (
+          <ResumeCard
+            ref={resumeCardRef}
+            job={resumingJob}
+            progress={resumeProgress}
+            elapsedSeconds={resumeElapsedSeconds}
+            onPause={pauseResume}
+            onAbort={abortResume}
+          />
+        )}
 
         {files.length > 0 && (
           <section className="mt-8 text-center min-w-0">

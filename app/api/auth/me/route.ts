@@ -31,12 +31,15 @@ export async function GET() {
       return res;
     }
 
+    const isAdmin = user.id === process.env.ADMIN_NIP;
+
     return NextResponse.json({
       user: {
         id: user.id,
         email: user.email,
         name: user.name,
         createdAt: user.createdAt,
+        isAdmin,
       },
     });
   } catch (err) {

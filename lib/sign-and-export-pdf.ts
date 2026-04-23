@@ -1,7 +1,6 @@
 import type jsPDF from "jspdf";
 
-const DOWNLOAD_NAME = "summary-signed.pdf";
-const PDF_FILENAME = "summary.pdf";
+const DEFAULT_UPLOAD_PDF = "summary.pdf";
 
 type SignPdfSuccess = { file: string };
 type SignPdfError = { error: string };
@@ -17,13 +16,31 @@ function getErrorMessage(obj: unknown): string {
 }
 
 /**
+ * Strips the last file extension, replaces spaces with hyphens, and replaces other
+ * non-letter/number characters (Unicode letters and digits kept) for use in export names.
+ * Example: `Rapat Bulanan.mp3` → `Rapat-Bulanan` (for `transkrip-Rapat-Bulanan.pdf`, etc.).
+ */
+export function sanitizeTitleForFilename(raw: string): string {
+  const base = raw.replace(/\.[^.]+$/i, "");
+  return (
+    base
+      .trim()
+      .replace(/\s+/g, "-")
+      .replace(/[^\p{L}\p{N}-]+/gu, "-")
+      .replace(/-+/g, "-")
+      .replace(/^-|-$/g, "") || "dokumen"
+  );
+}
+
+/**
  * Sign the generated PDF server-side, then download the signed file in the browser.
  * Must be called in a client context (not during SSR).
  */
 export async function signAndExportPdf(
   doc: jsPDF,
   passphrase: string,
-  nip: string
+  nip: string,
+  filename: string
 ): Promise<void> {
   if (typeof document === "undefined" || typeof window === "undefined") {
     throw new Error("signAndExportPdf hanya dapat dipanggil di browser.");
@@ -34,10 +51,15 @@ export async function signAndExportPdf(
     throw new Error("Gagal membuat berkas PDF.");
   }
 
+  const downloadName = filename.toLowerCase().endsWith(".pdf")
+    ? filename
+    : `${filename}.pdf`;
+  const uploadBasename = downloadName.split(/[/\\]/).pop() ?? downloadName;
+
   const formData = new FormData();
   formData.append("nip", nip);
   formData.append("passphrase", passphrase);
-  formData.append("file", pdfBlob, PDF_FILENAME);
+  formData.append("file", pdfBlob, uploadBasename || DEFAULT_UPLOAD_PDF);
 
   const res = await fetch("/api/sign-pdf", {
     method: "POST",
@@ -78,7 +100,7 @@ export async function signAndExportPdf(
   try {
     const a = document.createElement("a");
     a.href = url;
-    a.download = DOWNLOAD_NAME;
+    a.download = downloadName;
     a.rel = "noopener";
     document.body.appendChild(a);
     a.click();

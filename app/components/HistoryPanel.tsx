@@ -6,7 +6,7 @@ import { RawResult } from "@/app/components/RawResult";
 import { SummaryMarkdownBody } from "@/app/components/SummaryMarkdownBody";
 import { useAuth } from "@/app/contexts/AuthContext";
 import { prepareContentForPdf, renderPdfContent } from "@/lib/export-pdf";
-import { signAndExportPdf } from "@/lib/sign-and-export-pdf";
+import { sanitizeTitleForFilename, signAndExportPdf } from "@/lib/sign-and-export-pdf";
 import { PassphraseModal } from "@/components/PassphraseModal";
 import type { SummaryJobItem } from "@/app/hooks/useHistory";
 import type jsPDF from "jspdf";
@@ -187,7 +187,10 @@ export function HistoryPanel({
         if (!doc) {
           throw new Error("Tidak ada teks untuk diekspor.");
         }
-        await signAndExportPdf(doc, passphrase, user.id);
+        const fileStem = sanitizeTitleForFilename(modal.job.filename);
+        const outPdf =
+          modal.type === "transkrip" ? `transkrip-${fileStem}.pdf` : `rangkuman-${fileStem}.pdf`;
+        await signAndExportPdf(doc, passphrase, user.id, outPdf);
         setIsModalOpen(false);
       } catch (e) {
         const msg = e instanceof Error ? e.message : "Gagal mengekspor PDF. Coba lagi.";
@@ -280,7 +283,9 @@ export function HistoryPanel({
                           : job.status === "failed"
                             ? "Gagal"
                             : job.status === "cancelled"
-                              ? "Dibatalkan"
+                              ? job.isResumable
+                                ? "Dijeda"
+                                : "Dibatalkan"
                               : job.status === "waiting_rate_limit"
                                 ? "Menunggu batas API"
                                 : job.status === "processing"
@@ -299,24 +304,6 @@ export function HistoryPanel({
                           >
                             {resumeLoading === job.id ? "Melanjutkan…" : "Lanjutkan"}
                           </button>
-                          {resumeLoading === job.id && (
-                            <>
-                              <button
-                                type="button"
-                                onClick={onPauseResume}
-                                className="px-3 py-1.5 rounded-lg border border-amber-300 text-amber-700 text-sm font-medium hover:bg-amber-50"
-                              >
-                                Jeda
-                              </button>
-                              <button
-                                type="button"
-                                onClick={onAbortResume}
-                                className="px-3 py-1.5 rounded-lg border border-rose-300 text-rose-700 text-sm font-medium hover:bg-rose-50"
-                              >
-                                Batalkan
-                              </button>
-                            </>
-                          )}
                         </>
                       )}
                       {job.sourceText?.trim() && (
@@ -362,11 +349,6 @@ export function HistoryPanel({
                       )}
                     </p>
                   )}
-                  {resumeLoading === job.id && resumeProgress && (
-                    <p className="mt-2 text-xs text-blue-600">
-                      {resumeProgress.message ?? "Melanjutkan…"}
-                    </p>
-                  )}
                 </li>
               ))}
             </ul>
@@ -391,7 +373,43 @@ export function HistoryPanel({
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
-                    onClick={() => {
+                    onClick={async () => {
+                      if (!user) {
+                        window.alert("Sesi tidak valid. Silakan masuk kembali.");
+                        return;
+                      }
+                      if (user.isAdmin) {
+                        if (!modal) return;
+                        setIsLoading(true);
+                        try {
+                          const text =
+                            modal.type === "rangkuman"
+                              ? modal.job.summaryText!
+                              : modal.job.sourceText!;
+                          const doc = await buildHistoryJobJsPdf(
+                            text,
+                            modal.job.filename,
+                            modal.type
+                          );
+                          if (!doc) {
+                            throw new Error("Tidak ada teks untuk diekspor.");
+                          }
+                          const fileStem = sanitizeTitleForFilename(modal.job.filename);
+                          const outPdf =
+                            modal.type === "transkrip"
+                              ? `transkrip-${fileStem}.pdf`
+                              : `rangkuman-${fileStem}.pdf`;
+                          doc.save(outPdf);
+                        } catch (e) {
+                          const msg =
+                            e instanceof Error ? e.message : "Gagal mengekspor PDF. Coba lagi.";
+                          window.alert(msg);
+                          console.error(e);
+                        } finally {
+                          setIsLoading(false);
+                        }
+                        return;
+                      }
                       setPassphraseModalKey((k) => k + 1);
                       setIsModalOpen(true);
                     }}

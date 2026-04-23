@@ -13,10 +13,21 @@ import { ProgressDisplay } from "@/app/components/ProgressDisplay";
 import { HistoryPanel } from "@/app/components/HistoryPanel";
 import { RawResult } from "@/app/components/RawResult";
 
+function syntheticFileFromHistoryJob(filename: string, fileType: string): File {
+  const mime =
+    fileType === "pdf"
+      ? "application/pdf"
+      : fileType === "docx"
+        ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        : "audio/mpeg";
+  return new File([], filename, { type: mime });
+}
+
 export default function Home() {
   const { user, logout } = useAuth();
   const { groqApiKey, setGroqApiKey } = useGroqApiKey();
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
 
   const { historyJobs, fetchHistory, deleteJob } = useHistory(user);
   const [historyFocusSignal, setHistoryFocusSignal] = useState(0);
@@ -27,8 +38,6 @@ export default function Home() {
     summarizeLoading,
     summarizeProgress,
     liveSourceText,
-    estimatedSeconds,
-    elapsedSeconds,
     resumeLoading,
     resumeProgress,
     handleSummarize,
@@ -37,7 +46,7 @@ export default function Home() {
     handleResumeJob,
     pauseResume,
     abortResume,
-  } = useSummarize(groqApiKey, fetchHistory, setError, bumpHistoryFocus);
+  } = useSummarize(groqApiKey, fetchHistory, setError, setSuccess, bumpHistoryFocus);
 
   const { files, dragActive, addFiles, removeFile, handleDrag, handleDrop, ACCEPTED_FILE_TYPES } =
     useFileUpload(setError);
@@ -156,6 +165,11 @@ export default function Home() {
           </p>
         </div>
 
+        {success && (
+          <div className="mb-4 rounded-lg bg-green-50 px-4 py-3 text-green-700 text-sm text-center">
+            {success}
+          </div>
+        )}
         {error && (
           <div className="mt-4 p-3 rounded-lg bg-red-50 text-red-700 text-sm text-center" role="alert">
             {error}
@@ -167,37 +181,22 @@ export default function Home() {
           if (!resumingJob) return null;
           return (
             <section ref={resumeCardRef} className="mt-8 text-center min-w-0">
-              <h2 className="text-base font-semibold text-kemenkum-blue mb-3">Melanjutkan Rangkuman</h2>
               <div className="flex flex-col gap-3 p-3 rounded-lg border border-gray-200 bg-white shadow-sm overflow-hidden">
                 <div className="flex items-center justify-between gap-2 min-w-0">
                   <div className="min-w-0 flex-1 text-center sm:text-left">
                     <p className="font-medium text-gray-900 truncate">{resumingJob.filename}</p>
-                    <p className="text-xs text-gray-500">Dari Riwayat Unggahan</p>
+                    <p className="text-sm text-gray-500">Dari Riwayat Unggahan</p>
                   </div>
                 </div>
-                <div className="text-left">
-                  <p className="text-xs text-slate-600 mb-0.5">
-                    {resumeProgress.message ?? "Melanjutkan…"}
-                  </p>
-                  <div className="h-1.5 bg-slate-200 rounded-full overflow-hidden">
-                    <div className="h-full bg-kemenkum-blue animate-pulse" style={{ width: "60%" }} />
-                  </div>
+                <div className="w-full min-w-0">
+                  <ProgressDisplay
+                    file={syntheticFileFromHistoryJob(resumingJob.filename, resumingJob.fileType)}
+                    progress={resumeProgress}
+                  />
                 </div>
                 <div className="flex flex-wrap items-center gap-2 justify-end min-w-0">
-                  <button
-                    type="button"
-                    onClick={pauseResume}
-                    className="px-4 py-2 rounded-lg border border-amber-300 text-amber-700 text-sm font-medium hover:bg-amber-50 whitespace-nowrap"
-                  >
-                    Jeda
-                  </button>
-                  <button
-                    type="button"
-                    onClick={abortResume}
-                    className="px-4 py-2 rounded-lg border border-rose-300 text-rose-700 text-sm font-medium hover:bg-rose-50 whitespace-nowrap"
-                  >
-                    Batalkan
-                  </button>
+                  <button type="button" onClick={pauseResume} className="px-4 py-2 rounded-lg border border-amber-300 text-amber-700 text-sm font-medium hover:bg-amber-50 whitespace-nowrap">Jeda</button>
+                  <button type="button" onClick={abortResume} className="px-4 py-2 rounded-lg border border-rose-300 text-rose-700 text-sm font-medium hover:bg-rose-50 whitespace-nowrap">Batalkan</button>
                 </div>
               </div>
             </section>
@@ -236,12 +235,7 @@ export default function Home() {
                   </div>
                   {summarizeLoading === item.id && summarizeProgress && (
                     <div className="w-full min-w-0">
-                      <ProgressDisplay
-                        file={item.file}
-                        progress={summarizeProgress}
-                        estimatedSeconds={estimatedSeconds}
-                        elapsedSeconds={elapsedSeconds}
-                      />
+                      <ProgressDisplay file={item.file} progress={summarizeProgress} />
                     </div>
                   )}
                   {summarizeLoading === item.id &&
@@ -268,7 +262,10 @@ export default function Home() {
                       <>
                         <button
                           type="button"
-                          onClick={pauseSummarize}
+                          onClick={() => {
+                            pauseSummarize();
+                            removeFile(item.id);
+                          }}
                           className="px-4 py-2 rounded-lg border border-amber-300 text-amber-700 text-sm font-medium hover:bg-amber-50 whitespace-nowrap"
                         >
                           Jeda

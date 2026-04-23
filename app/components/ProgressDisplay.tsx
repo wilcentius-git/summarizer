@@ -3,23 +3,12 @@
 import type { SummarizeProgress } from "@/app/hooks/useSummarize";
 import { isAudioFile } from "@/app/components/FileUpload";
 
-function formatElapsedTime(seconds: number): string {
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  const s = Math.floor(seconds % 60);
-  const pad = (n: number) => n.toString().padStart(2, "0");
-  if (h >= 1) return `${pad(h)}:${pad(m)}:${pad(s)}`;
-  return `${pad(m)}:${pad(s)}`;
-}
-
 type ProgressDisplayProps = {
   file: File;
   progress: SummarizeProgress;
-  estimatedSeconds: number | null;
-  elapsedSeconds: number;
 };
 
-export function ProgressDisplay({ file, progress, estimatedSeconds, elapsedSeconds }: ProgressDisplayProps) {
+export function ProgressDisplay({ file, progress }: ProgressDisplayProps) {
   if (isAudioFile(file)) {
     return (
       <div className="p-4 rounded-xl bg-gradient-to-br from-slate-50 to-blue-50 border border-slate-200">
@@ -31,9 +20,7 @@ export function ProgressDisplay({ file, progress, estimatedSeconds, elapsedSecon
             <p className="font-medium text-slate-800 truncate">
               {progress.message ?? "Memproses audio…"}
             </p>
-            <p className="text-xs text-slate-500">
-              Langkah {progress.step ?? 1}/2 • {formatElapsedTime(elapsedSeconds)}
-            </p>
+            <p className="text-xs text-slate-500">Langkah {progress.step ?? 1}/2</p>
           </div>
         </div>
         <div className="flex gap-2 mb-2">
@@ -69,14 +56,6 @@ export function ProgressDisplay({ file, progress, estimatedSeconds, elapsedSecon
             }}
           />
         </div>
-        {estimatedSeconds != null && (
-          <p className="text-xs text-slate-500 mt-2 italic">
-            Estimasi: ~
-            {estimatedSeconds < 60
-              ? `${estimatedSeconds} detik`
-              : `${Math.ceil(estimatedSeconds / 60)} menit`}
-          </p>
-        )}
       </div>
     );
   }
@@ -106,14 +85,6 @@ export function ProgressDisplay({ file, progress, estimatedSeconds, elapsedSecon
           }}
         />
       </div>
-      {estimatedSeconds && (
-        <p className="text-xs text-slate-500 mt-0.5">
-          Estimasi: ~
-          {estimatedSeconds < 60
-            ? `${estimatedSeconds} detik`
-            : `${Math.ceil(estimatedSeconds / 60)} menit`}
-        </p>
-      )}
     </div>
   );
 }

@@ -13,8 +13,6 @@ export type SummarizePipelineConfig = {
   mergeRateLimitBackoffMs: number;
   mergeRateLimitMaxAttempts: number;
   transcribeChunkDelayMs: number;
-  /** Pause after audio transcription before chat summarization (rate-limit spacing). */
-  postTranscribeCooldownMs: number;
 };
 
 /** Default pacing (safer for Groq free tier: fewer 429/413 failures). */
@@ -28,5 +26,4 @@ export const SUMMARIZE_PIPELINE_STANDARD: SummarizePipelineConfig = {
   mergeRateLimitBackoffMs: 72_000,
   mergeRateLimitMaxAttempts: 5,
   transcribeChunkDelayMs: 3000,
-  postTranscribeCooldownMs: 30_000,
 };

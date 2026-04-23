@@ -47,6 +47,8 @@ export async function GET() {
           sourceText?.trim() || extractedTextForRetry?.trim() || null,
         isResumable:
           rest.status !== "completed" &&
+          rest.status !== "processing" &&
+          !rest.summaryText?.trim() &&
           (!!extractedTextForRetry || !!audioPath),
       })
     );

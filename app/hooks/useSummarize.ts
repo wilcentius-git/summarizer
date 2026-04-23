@@ -42,7 +42,6 @@ function estimateAudioTranscribeSeconds(
   const CHARS_PER_MIN_AUDIO = 900;
   const SUMMARIZE_SEC_PER_CHUNK = 42;
   const MERGE_OVERHEAD_SEC = 60;
-  const postTranscribeSec = SUMMARIZE_PIPELINE_STANDARD.postTranscribeCooldownMs / 1000;
 
   let durationMin: number;
   if (durationSeconds != null && durationSeconds > 0) {
@@ -61,7 +60,7 @@ function estimateAudioTranscribeSeconds(
   const sumChunks = Math.max(1, Math.ceil(transcriptChars / pipe.summarizeChunkSize));
 
   const transTime = transChunks * TRANSCRIBE_SEC_PER_CHUNK;
-  const sumTime = sumChunks * SUMMARIZE_SEC_PER_CHUNK + MERGE_OVERHEAD_SEC + postTranscribeSec;
+  const sumTime = sumChunks * SUMMARIZE_SEC_PER_CHUNK + MERGE_OVERHEAD_SEC;
   return Math.max(60, Math.ceil(transTime + sumTime));
 }
 
@@ -80,6 +79,7 @@ export function useSummarize(
   groqApiKey: string,
   fetchHistory: () => Promise<void>,
   setError: (err: string | null) => void,
+  setSuccess: (msg: string | null) => void,
   onSuccessfulCompletion?: () => void
 ) {
   const [summarizeLoading, setSummarizeLoading] = useState<string | null>(null);
@@ -91,11 +91,9 @@ export function useSummarize(
   const summarizeAbortRef = useRef<AbortController | null>(null);
 
   const [resumeLoading, setResumeLoading] = useState<string | null>(null);
-  const [resumeProgress, setResumeProgress] = useState<{
-    message?: string;
-    mergeRound?: number;
-  } | null>(null);
+  const [resumeProgress, setResumeProgress] = useState<SummarizeProgress | null>(null);
   const resumeAbortRef = useRef<AbortController | null>(null);
+  const isPausingRef = useRef(false);
 
   useEffect(() => {
     if (!summarizeLoading) {
@@ -110,6 +108,7 @@ export function useSummarize(
   }, [summarizeLoading]);
 
   const pauseSummarize = useCallback(async () => {
+    isPausingRef.current = true;
     summarizeAbortRef.current?.abort();
     if (currentSummarizeJobId) {
       try {
@@ -238,12 +237,13 @@ export function useSummarize(
           }
         }
       } catch (err) {
-        if (err instanceof Error && err.name === "AbortError") {
+        if (err instanceof Error && err.name === "AbortError" && !isPausingRef.current) {
           setError("Dibatalkan.");
-        } else {
+        } else if (!(err instanceof Error && err.name === "AbortError")) {
           setError(toUserFriendlyError(err instanceof Error ? err.message : "Summarize failed."));
         }
       } finally {
+        isPausingRef.current = false;
         setSummarizeLoading(null);
         setSummarizeProgress(null);
         setEstimatedSeconds(null);
@@ -257,6 +257,7 @@ export function useSummarize(
   );
 
   const pauseResume = useCallback(async () => {
+    isPausingRef.current = true;
     resumeAbortRef.current?.abort();
     const jobId = resumeLoading;
     if (jobId) {
@@ -294,7 +295,13 @@ export function useSummarize(
       if (!job.isResumable) return;
       setError(null);
       setResumeLoading(job.id);
-      setResumeProgress({ message: "Melanjutkan…" });
+      setResumeProgress({
+        message: "Melanjutkan…",
+        phase: "transcribing",
+        current: 0,
+        total: 0,
+        step: 1,
+      });
 
       const controller = new AbortController();
       resumeAbortRef.current = controller;
@@ -307,6 +314,18 @@ export function useSummarize(
           signal: controller.signal,
           credentials: "include",
         });
+
+        if (res.ok) {
+          const contentType = res.headers.get("content-type") ?? "";
+          if (contentType.includes("application/json") && !contentType.includes("ndjson")) {
+            const data = (await res.json()) as { message?: string };
+            if (data.message) {
+              setSuccess(data.message);
+              fetchHistory();
+              return;
+            }
+          }
+        }
 
         if (!res.ok || !res.body) {
           const text = await res.text();
@@ -356,6 +375,11 @@ export function useSummarize(
                 setResumeProgress({
                   message: msg,
                   mergeRound: data.mergeRound,
+                  phase: data.phase ?? "processing",
+                  current: data.current ?? 0,
+                  total: data.total ?? 0,
+                  step: data.step,
+                  stepLabel: data.stepLabel,
                 });
               } else if (data.type === "summary") {
                 void fetchHistory().then(() => {
@@ -377,19 +401,20 @@ export function useSummarize(
           }
         }
       } catch (err) {
-        if (err instanceof Error && err.name === "AbortError") {
+        if (err instanceof Error && err.name === "AbortError" && !isPausingRef.current) {
           setError("Dibatalkan.");
-        } else {
+        } else if (!(err instanceof Error && err.name === "AbortError")) {
           setError(toUserFriendlyError(err instanceof Error ? err.message : "Resume failed."));
         }
       } finally {
+        isPausingRef.current = false;
         setResumeLoading(null);
         setResumeProgress(null);
         resumeAbortRef.current = null;
         fetchHistory();
       }
     },
-    [groqApiKey, fetchHistory, setError, onSuccessfulCompletion]
+    [groqApiKey, fetchHistory, setError, setSuccess, onSuccessfulCompletion]
   );
 
   return {

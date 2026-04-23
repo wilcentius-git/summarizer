@@ -9,6 +9,8 @@ type ResumableJob = {
   id: string;
   status: string;
   filename: string;
+  fileType: string;
+  summaryText?: string | null;
   extractedTextForRetry: string | null;
   jobRetryContext: string | null;
   partialSummary?: string | null;
@@ -72,7 +74,21 @@ export async function POST(
     const resumableJob = job as ResumableJob;
 
     if (resumableJob.status === "completed") {
-      return NextResponse.json({ error: "Job already completed" }, { status: 400 });
+      return NextResponse.json({ message: "Rangkuman selesai." }, { status: 200 });
+    }
+
+    if (resumableJob.summaryText?.trim()) {
+      return NextResponse.json({ message: "Rangkuman selesai." }, { status: 200 });
+    }
+
+    if (resumableJob.status === "processing") {
+      return NextResponse.json(
+        {
+          error:
+            "Pekerjaan ini sedang diproses. Tunggu hingga selesai atau batalkan jika macet.",
+        },
+        { status: 409 }
+      );
     }
 
     let text: string | null = resumableJob.extractedTextForRetry;
@@ -105,6 +121,47 @@ export async function POST(
           error:
             "Groq API key is required. Set GROQ_API_KEY in .env.local on the server, or send groqApiKey in the request (kunci groq sendiri opsional).",
         },
+        { status: 400 }
+      );
+    }
+
+    const resumableStatuses = [
+      "pending",
+      "failed",
+      "waiting_rate_limit",
+      "cancelled",
+    ] as const;
+
+    const claimResult = await prisma.summaryJob.updateMany({
+      where: {
+        id: jobId,
+        userId: payload.userId,
+        status: { in: [...resumableStatuses] },
+      },
+      data: { status: "processing" },
+    });
+
+    if (claimResult.count === 0) {
+      const latest = await prisma.summaryJob.findFirst({
+        where: { id: jobId, userId: payload.userId },
+      });
+      if (!latest) {
+        return NextResponse.json({ error: "Job not found" }, { status: 404 });
+      }
+      if (latest.status === "completed" || latest.summaryText?.trim()) {
+        return NextResponse.json({ message: "Rangkuman selesai." }, { status: 200 });
+      }
+      if (latest.status === "processing") {
+        return NextResponse.json(
+          {
+            error:
+              "Pekerjaan ini sedang diproses. Tunggu hingga selesai atau batalkan jika macet.",
+          },
+          { status: 409 }
+        );
+      }
+      return NextResponse.json(
+        { error: "Tidak dapat melanjutkan pekerjaan dalam status ini." },
         { status: 400 }
       );
     }
@@ -142,19 +199,28 @@ export async function POST(
           }
         ) => {
           try {
-            await prisma.summaryJob.update({
+            const result = await prisma.summaryJob.updateMany({
               where: { id: jobId },
               data: updates as Record<string, unknown>,
             });
+            if (result.count === 0) {
+              console.warn(
+                "SummaryJob resume update skipped: no row for id (job may have been deleted).",
+                jobId
+              );
+            }
           } catch (e) {
             console.error("SummaryJob resume update failed:", e);
           }
         };
 
         const pipeline: SummarizePipelineConfig = SUMMARIZE_PIPELINE_STANDARD;
+        const isAudioJob = context.isAudio === true || resumableJob.fileType === "mp3";
+        const glossary = String((body as { glossary?: string }).glossary ?? "").trim();
 
         try {
-          await updateJob({ status: "processing" });
+          // Status already set to processing by atomic claim before the stream starts.
+          let completedTranscriptionThisRun = false;
 
           // Resume from transcription if we have audio but no extracted text yet
           if (!text?.trim() && hasTranscriptionResume && resumableJob.audioPath) {
@@ -175,13 +241,18 @@ export async function POST(
               current: startFromChunk,
               total: 0,
               message: `Melanjutkan transkripsi dari bagian ${startFromChunk + 1}…`,
+              step: 1,
+              stepLabel: "Transkripsi",
             });
 
             try {
               transcribeStartMs = Date.now();
               text = await transcribeWithGroq(buffer, apiKey, {
-                language: "id",
                 fileName: resumableJob.filename,
+                prompt: [
+                  "Transkrip audio berikut. Jangan tambahkan teks yang tidak ada dalam audio. Jangan ulangi kata atau frasa. Jangan tambahkan 'Terima kasih' atau kalimat penutup yang tidak ada dalam audio.",
+                  glossary || "",
+                ].filter(Boolean).join(" "),
                 startFromChunk,
                 initialTranscripts,
                 chunkDelayMs: pipeline.transcribeChunkDelayMs,
@@ -192,7 +263,12 @@ export async function POST(
                     phase: "transcribing",
                     current,
                     total,
-                    message: `Transkripsi bagian ${current} dari ${total}…`,
+                    message:
+                      total > 1
+                        ? `Transkripsi bagian ${current} dari ${total}…`
+                        : "Mengirim ke Groq Whisper untuk transkripsi…",
+                    step: 1,
+                    stepLabel: "Transkripsi",
                   });
                 },
                 onChunkDone: async (chunkIndex, _t, transcriptsSoFar) => {
@@ -228,6 +304,7 @@ export async function POST(
                 summarizeChunkSize: pipeline.summarizeChunkSize,
               }),
             });
+            completedTranscriptionThisRun = true;
           }
 
           const finalText = text!.trim();
@@ -240,8 +317,16 @@ export async function POST(
 
           send({ type: "sourceText", text: finalText });
 
-          if (finalText.length <= pipeline.summarizeChunkSize) {
-              send({ type: "progress", phase: "summarizing", message: "Merangkum…" });
+          if (!isAudioJob && finalText.length <= pipeline.summarizeChunkSize) {
+              send({
+                type: "progress",
+                phase: "summarizing",
+                current: 1,
+                total: 1,
+                message: isAudioJob ? "Transkrip selesai. Merangkum…" : "Merangkum dokumen…",
+                step: isAudioJob ? 2 : 1,
+                stepLabel: "Rangkuman",
+              });
               summarizeStartMs = Date.now();
               const summary = await summarizeWithGroq(finalText, apiKey);
               summarizeEndMs = Date.now();
@@ -297,6 +382,8 @@ export async function POST(
                 current: startFromChunk,
                 total,
                 message: `Melanjutkan dari bagian ${startFromChunk + 1}…`,
+                step: isAudioJob ? 2 : 1,
+                stepLabel: "Rangkuman",
               });
 
               const accumulatedSummaries = [...initialSummaries];
@@ -337,6 +424,8 @@ export async function POST(
                   current: i + 1,
                   total,
                   message: `Bagian ${i + 1} dari ${total} selesai`,
+                  step: isAudioJob ? 2 : 1,
+                  stepLabel: "Rangkuman",
                 });
                 if (i < chunks.length - 1) {
                   console.log(`[CHUNK ${i + 1}/${total}] Sleeping ${delayMs}ms`);
@@ -384,7 +473,15 @@ export async function POST(
                 }
               }
 
-              send({ type: "progress", phase: "merge", message: "Menggabungkan rangkuman…" });
+              send({
+                type: "progress",
+                phase: "merge",
+                current: 0,
+                total: 1,
+                message: "Mempersiapkan penggabungan…",
+                step: isAudioJob ? 2 : 1,
+                stepLabel: "Gabung",
+              });
               console.log(
                 `>>> [MERGE] Phase starting. Total chunks: ${accumulatedSummaries.length}`
               );
@@ -400,6 +497,8 @@ export async function POST(
                       tot > 1
                         ? `Menggabungkan bagian ${cur} dari ${tot}…`
                         : "Menggabungkan rangkuman…",
+                    step: isAudioJob ? 2 : 1,
+                    stepLabel: "Gabung",
                   });
                 },
                 onBatchComplete: async (batchResults) => {

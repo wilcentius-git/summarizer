@@ -166,10 +166,16 @@ export async function POST(request: NextRequest) {
         completedAt?: Date;
       }) => {
         try {
-          await prisma.summaryJob.update({
+          const result = await prisma.summaryJob.updateMany({
             where: { id: job.id },
             data: updates,
           });
+          if (result.count === 0) {
+            console.warn(
+              "SummaryJob update skipped: no row for id (job may have been deleted).",
+              job.id
+            );
+          }
         } catch (e) {
           console.error("SummaryJob update failed:", e);
         }
@@ -211,9 +217,11 @@ export async function POST(request: NextRequest) {
           try {
             transcribeStartMs = Date.now();
             text = await transcribeWithGroq(buffer, apiKey, {
-              language: "id",
               fileName,
-              prompt: glossary || undefined,
+              prompt: [
+                "Transkrip audio berikut. Jangan tambahkan teks yang tidak ada dalam audio. Jangan ulangi kata atau frasa. Jangan tambahkan 'Terima kasih' atau kalimat penutup yang tidak ada dalam audio.",
+                glossary || "",
+              ].filter(Boolean).join(" "),
               chunkDelayMs: pipeline.transcribeChunkDelayMs,
               isCancelled: () => isJobCancelled(job.id),
               onChunkProgress: (current, total) => {
@@ -285,21 +293,9 @@ export async function POST(request: NextRequest) {
 
         let summary: string;
 
-        if (isAudio) {
-          send({
-            type: "progress",
-            phase: "cooldown",
-            current: 0,
-            total: 1,
-            message: "Transkripsi selesai. Menunggu sebelum merangkum…",
-            step: 2,
-            stepLabel: "Menunggu",
-          });
-          await sleep(pipeline.postTranscribeCooldownMs);
-        }
-
         try {
-          if (text.length <= pipeline.summarizeChunkSize) {
+          console.log(`>>> [SUMMARIZE] Starting. Text length: ${text.length} chars`);
+          if (!isAudio && text.length <= pipeline.summarizeChunkSize) {
             await updateJob({ progressPercentage: 60 });
             send({
               type: "progress",
@@ -463,6 +459,7 @@ export async function POST(request: NextRequest) {
           if (audioPathToCleanup) deleteAudio(audioPathToCleanup);
           send({ type: "summary", text: summary });
         } catch (groqErr) {
+          console.log(`>>> [SUMMARIZE] Error:`, groqErr);
           if (isGroqRateLimitError(groqErr)) {
             const retryAfter = new Date(Date.now() + RETRY_AFTER_HOURS * 60 * 60 * 1000);
             await updateJob({

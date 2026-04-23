@@ -14,6 +14,7 @@ type User = {
   email: string;
   name: string | null;
   createdAt: string;
+  isAdmin: boolean;
 };
 
 type AuthContextValue = {
@@ -42,7 +43,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return;
       }
       const data = await res.json();
-      setUser(data.user ?? null);
+      if (data.user) {
+        setUser({
+          id: data.user.id,
+          email: data.user.email,
+          name: data.user.name ?? null,
+          createdAt: data.user.createdAt,
+          isAdmin: Boolean(data.user.isAdmin),
+        });
+      } else {
+        setUser(null);
+      }
     } catch {
       setUser(null);
     } finally {

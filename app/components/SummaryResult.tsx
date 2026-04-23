@@ -5,7 +5,7 @@ import { RawResult } from "@/app/components/RawResult";
 import { SummaryMarkdownBody } from "@/app/components/SummaryMarkdownBody";
 import { useAuth } from "@/app/contexts/AuthContext";
 import { prepareContentForPdf, renderPdfContent } from "@/lib/export-pdf";
-import { signAndExportPdf } from "@/lib/sign-and-export-pdf";
+import { sanitizeTitleForFilename, signAndExportPdf } from "@/lib/sign-and-export-pdf";
 import { PassphraseModal } from "@/components/PassphraseModal";
 import type jsPDF from "jspdf";
 
@@ -110,7 +110,8 @@ export function SummaryResultPanel({ summary }: SummaryResultProps) {
         if (!doc) {
           throw new Error("Tidak ada teks untuk diekspor.");
         }
-        await signAndExportPdf(doc, passphrase, user.id);
+        const fileStem = sanitizeTitleForFilename(summary.fileName);
+        await signAndExportPdf(doc, passphrase, user.id, `rangkuman-${fileStem}.pdf`);
         setIsModalOpen(false);
       } catch (e) {
         const msg = e instanceof Error ? e.message : "Gagal mengekspor PDF. Coba lagi.";
@@ -120,7 +121,7 @@ export function SummaryResultPanel({ summary }: SummaryResultProps) {
         setIsLoading(false);
       }
     },
-    [user, buildSummaryJsPdf]
+    [user, buildSummaryJsPdf, summary.fileName]
   );
 
   return (
@@ -138,8 +139,30 @@ export function SummaryResultPanel({ summary }: SummaryResultProps) {
           </button>
           <button
             type="button"
-            onClick={() => {
+            onClick={async () => {
               if (!summary.text) return;
+              if (!user) {
+                window.alert("Sesi tidak valid. Silakan masuk kembali.");
+                return;
+              }
+              if (user.isAdmin) {
+                setIsLoading(true);
+                try {
+                  const doc = await buildSummaryJsPdf();
+                  if (!doc) {
+                    throw new Error("Tidak ada teks untuk diekspor.");
+                  }
+                  const fileStem = sanitizeTitleForFilename(summary.fileName);
+                  doc.save(`rangkuman-${fileStem}.pdf`);
+                } catch (e) {
+                  const msg = e instanceof Error ? e.message : "Gagal mengekspor PDF. Coba lagi.";
+                  window.alert(msg);
+                  console.error(e);
+                } finally {
+                  setIsLoading(false);
+                }
+                return;
+              }
               setPassphraseModalKey((k) => k + 1);
               setIsModalOpen(true);
             }}

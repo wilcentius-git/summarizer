@@ -8,11 +8,31 @@ services:
         required: false
     environment:
       NODE_ENV: production
-      # Writable SQLite path inside the container (override host .env if needed)
-      DATABASE_URL: file:/app/data/prod.db
+      DATABASE_URL: postgresql://summarizer_user:changeme@db:5432/summarizer_db
     volumes:
-      - summarizer-data:/app/data
+      - summarizer-uploads:/app/uploads/jobs
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  db:
+    image: postgres:17-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: summarizer_db
+      POSTGRES_USER: summarizer_user
+      POSTGRES_PASSWORD: changeme
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U summarizer_user -d summarizer_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     restart: unless-stopped
 
 volumes:
-  summarizer-data:
+  summarizer-uploads:
+  postgres_data:

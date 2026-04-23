@@ -92,6 +92,7 @@ export function useSummarize(
 
   const [resumeLoading, setResumeLoading] = useState<string | null>(null);
   const [resumeProgress, setResumeProgress] = useState<SummarizeProgress | null>(null);
+  const [resumeElapsedSeconds, setResumeElapsedSeconds] = useState(0);
   const resumeAbortRef = useRef<AbortController | null>(null);
   const isPausingRef = useRef(false);
 
@@ -106,6 +107,18 @@ export function useSummarize(
     }, 1000);
     return () => clearInterval(interval);
   }, [summarizeLoading]);
+
+  useEffect(() => {
+    if (!resumeLoading) {
+      setResumeElapsedSeconds(0);
+      return;
+    }
+    const start = Date.now();
+    const interval = setInterval(() => {
+      setResumeElapsedSeconds(Math.floor((Date.now() - start) / 1000));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [resumeLoading]);
 
   const pauseSummarize = useCallback(async () => {
     isPausingRef.current = true;
@@ -425,6 +438,7 @@ export function useSummarize(
     elapsedSeconds,
     resumeLoading,
     resumeProgress,
+    resumeElapsedSeconds,
     handleSummarize,
     pauseSummarize,
     abortSummarize,

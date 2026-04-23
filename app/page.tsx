@@ -38,8 +38,10 @@ export default function Home() {
     summarizeLoading,
     summarizeProgress,
     liveSourceText,
+    elapsedSeconds,
     resumeLoading,
     resumeProgress,
+    resumeElapsedSeconds,
     handleSummarize,
     pauseSummarize,
     abortSummarize,
@@ -192,6 +194,7 @@ export default function Home() {
                   <ProgressDisplay
                     file={syntheticFileFromHistoryJob(resumingJob.filename, resumingJob.fileType)}
                     progress={resumeProgress}
+                    elapsedSeconds={resumeElapsedSeconds}
                   />
                 </div>
                 <div className="flex flex-wrap items-center gap-2 justify-end min-w-0">
@@ -235,7 +238,11 @@ export default function Home() {
                   </div>
                   {summarizeLoading === item.id && summarizeProgress && (
                     <div className="w-full min-w-0">
-                      <ProgressDisplay file={item.file} progress={summarizeProgress} />
+                      <ProgressDisplay
+                        file={item.file}
+                        progress={summarizeProgress}
+                        elapsedSeconds={elapsedSeconds}
+                      />
                     </div>
                   )}
                   {summarizeLoading === item.id &&

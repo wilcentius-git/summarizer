@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { setAuthTokenCookie } from "@/lib/auth-cookie";
-import { createToken } from "@/lib/auth";
+import { createToken, verifyPassword } from "@/lib/auth";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { loginSchema } from "@/lib/validations";
-import { isAdminLogin } from "@/lib/admin-auth";
+import { prisma } from "@/lib/prisma";
 import { loginViaSimpeg } from "@/lib/simpeg-login";
 import { ensureUserForNip } from "@/lib/provision-user";
 
@@ -25,10 +25,15 @@ export async function POST(request: Request) {
     let canonicalNip: string;
     let displayName: string | undefined;
 
-    if (isAdminLogin(nip, pass)) {
-      canonicalNip = nip.trim();
-      displayName =
-        process.env.ADMIN_DISPLAY_NAME?.trim() || "Administrator";
+    const trimmedNip = nip.trim();
+    const dbUser = await prisma.user.findUnique({ where: { id: trimmedNip } });
+    const isDbAdmin = dbUser
+      ? await verifyPassword(pass, dbUser.passwordHash)
+      : false;
+
+    if (isDbAdmin) {
+      canonicalNip = trimmedNip;
+      displayName = dbUser?.name ?? "Administrator";
     } else {
       console.log("[login] before Pusdatin API (loginViaSimpeg)");
       const simpeg = await loginViaSimpeg(nip, pass);

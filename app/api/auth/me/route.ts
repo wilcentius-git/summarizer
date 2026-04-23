@@ -22,7 +22,7 @@ export async function GET() {
 
     const user = await prisma.user.findUnique({
       where: { id: payload.userId },
-      select: { id: true, email: true, name: true, createdAt: true },
+      select: { id: true, email: true, name: true, createdAt: true, isAdmin: true },
     });
 
     if (!user) {
@@ -31,7 +31,7 @@ export async function GET() {
       return res;
     }
 
-    const isAdmin = user.id === process.env.ADMIN_NIP;
+    const isAdmin = user.isAdmin ?? false;
 
     return NextResponse.json({
       user: {

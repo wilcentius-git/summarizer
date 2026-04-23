@@ -1,82 +1,89 @@
 "use client";
 
 import type { SummarizeProgress } from "@/app/hooks/useSummarize";
-import { isAudioFile } from "@/app/components/FileUpload";
+import { formatSize } from "@/app/components/FileUpload";
 
 type ProgressDisplayProps = {
   file: File;
   progress: SummarizeProgress;
+  elapsedSeconds: number;
 };
 
-export function ProgressDisplay({ file, progress }: ProgressDisplayProps) {
-  if (isAudioFile(file)) {
-    return (
-      <div className="p-4 rounded-xl bg-gradient-to-br from-slate-50 to-blue-50 border border-slate-200">
-        <div className="flex items-center gap-3 mb-3">
-          <div className="w-10 h-10 rounded-full bg-kemenkum-blue/20 flex items-center justify-center animate-pulse">
-            <span className="text-xl" aria-hidden>🎙️</span>
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="font-medium text-slate-800 truncate">
-              {progress.message ?? "Memproses audio…"}
-            </p>
-            <p className="text-xs text-slate-500">Langkah {progress.step ?? 1}/2</p>
-          </div>
-        </div>
-        <div className="flex gap-2 mb-2">
-          {["Transkripsi", "Rangkuman"].map((label, i) => {
-            const stepNum = i + 1;
-            const isDone = (progress.step ?? 1) > stepNum;
-            const isActive = (progress.step ?? 1) === stepNum;
-            return (
-              <span
-                key={label}
-                className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${
-                  isDone
-                    ? "bg-emerald-100 text-emerald-800"
-                    : isActive
-                      ? "bg-kemenkum-blue/20 text-kemenkum-blue ring-1 ring-kemenkum-blue/30"
-                      : "bg-slate-100 text-slate-500"
-                }`}
-              >
-                {stepNum}. {label}
-                {isDone && " ✓"}
-              </span>
-            );
-          })}
-        </div>
-        <div className="h-1.5 bg-slate-200 rounded-full overflow-hidden">
-          <div
-            className="h-full bg-kemenkum-blue transition-all duration-300"
-            style={{
-              width: `${Math.min(
-                100,
-                (progress.current / Math.max(1, progress.total)) * 100
-              )}%`,
-            }}
-          />
-        </div>
-      </div>
-    );
+function formatElapsedTime(totalSec: number): string {
+  const s = Math.max(0, Math.floor(totalSec));
+  if (s < 3600) {
+    const m = Math.floor(s / 60);
+    const r = s % 60;
+    return `${String(m).padStart(2, "0")}:${String(r).padStart(2, "0")}`;
   }
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const r = s % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(r).padStart(2, "0")}`;
+}
 
+function activePhaseTab(phase: string): 1 | 2 | 3 {
+  if (phase === "extracting" || phase === "transcribing") return 1;
+  if (phase === "merge") return 3;
+  if (phase === "summarizing" || phase === "chunks") return 2;
+  return 2;
+}
+
+const PHASE_TABS = [
+  { num: 1, label: "Transkripsi" },
+  { num: 2, label: "Merangkum" },
+  { num: 3, label: "Finalisasi" },
+] as const;
+
+const secondaryTextStyle = {
+  fontSize: 13,
+  color: "var(--color-text-secondary, #64748b)",
+} as const;
+
+function displayMessage(progress: SummarizeProgress): string {
+  if (progress.message?.trim()) return progress.message;
+  if (progress.phase === "extracting") return "Mengekstrak teks…";
+  if (progress.phase === "transcribing") return "Mentranskripsi audio…";
+  if (progress.phase === "chunks")
+    return `Bagian ${progress.current} dari ${progress.total}`;
+  if (progress.phase === "merge") return "Menggabungkan rangkuman…";
+  return "Merangkum…";
+}
+
+export function ProgressDisplay({ file, progress, elapsedSeconds }: ProgressDisplayProps) {
+  const active = activePhaseTab(progress.phase);
   return (
-    <div className="text-left">
-      <p className="text-xs text-slate-600 mb-0.5">
-        {progress.message ??
-          (progress.phase === "extracting"
-            ? "Mengekstrak teks…"
-            : progress.phase === "transcribing"
-              ? "Mentranskripsi audio…"
-              : progress.phase === "chunks"
-                ? `Bagian ${progress.current} dari ${progress.total}`
-                : progress.phase === "merge"
-                  ? "Menggabungkan rangkuman…"
-                  : "Merangkum…")}
-      </p>
-      <div className="h-1.5 bg-slate-200 rounded-full overflow-hidden">
+    <div className="p-4 rounded-xl bg-gradient-to-br from-slate-50 to-blue-50 border border-slate-200 min-w-0">
+      <div className="flex items-baseline justify-between gap-2 min-w-0 mb-3">
+        <p className="font-medium text-slate-900 truncate min-w-0 text-left">{file.name}</p>
+        <p className="shrink-0 text-sm text-slate-600 tabular-nums">{formatSize(file.size)}</p>
+      </div>
+
+      <div className="flex flex-wrap mb-3" style={{ gap: 8 }}>
+        {PHASE_TABS.map(({ num, label }) => {
+          const isDone = num < active;
+          const isActive = num === active;
+          return (
+            <span
+              key={num}
+              className={`inline-flex items-center rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
+                isActive
+                  ? "bg-kemenkum-blue/20 text-kemenkum-blue ring-1 ring-kemenkum-blue/30"
+                  : isDone
+                    ? "bg-emerald-100 text-emerald-800"
+                    : "text-slate-500"
+              }`}
+            >
+              {num}. {label}
+              {isDone && " ✓"}
+            </span>
+          );
+        })}
+      </div>
+
+      <div className="w-full h-[5px] bg-slate-200 rounded-full overflow-hidden mb-2">
         <div
-          className="h-full bg-kemenkum-blue transition-all duration-300"
+          className="h-full min-w-0 rounded-full bg-kemenkum-blue transition-all duration-300"
           style={{
             width: `${Math.min(
               100,
@@ -84,6 +91,15 @@ export function ProgressDisplay({ file, progress }: ProgressDisplayProps) {
             )}%`,
           }}
         />
+      </div>
+
+      <div className="flex justify-between items-baseline gap-2 min-w-0">
+        <p className="min-w-0 flex-1 truncate text-left" style={secondaryTextStyle}>
+          {displayMessage(progress)}
+        </p>
+        <p className="shrink-0 tabular-nums" style={secondaryTextStyle}>
+          {formatElapsedTime(elapsedSeconds)}
+        </p>
       </div>
     </div>
   );

@@ -32,6 +32,7 @@ import {
 } from "@/lib/transcribe-audio";
 import { deleteAudio, saveAudio } from "@/lib/audio-storage";
 import { resolveGroqApiKey } from "@/lib/resolve-groq-api-key";
+import { checkRateLimit } from "@/lib/rate-limit";
 
 function sendStreamLine(controller: ReadableStreamDefaultController<Uint8Array>, obj: object) {
   const encoder = new TextEncoder();
@@ -51,6 +52,14 @@ export async function POST(request: NextRequest) {
   const payload = token ? await verifyToken(token) : null;
   if (!payload) {
     return NextResponse.json({ error: "Unauthorized. Please log in." }, { status: 401 });
+  }
+
+  const rateLimitResult = await checkRateLimit(`summarize:${payload.userId}`);
+  if (!rateLimitResult.success) {
+    return NextResponse.json(
+      { error: "Terlalu banyak permintaan. Silakan tunggu sebelum mencoba lagi." },
+      { status: 429 }
+    );
   }
 
   let formData: FormData;
@@ -471,11 +480,10 @@ export async function POST(request: NextRequest) {
           throw groqErr;
         }
       } catch (err) {
-        console.error("Summarize error:", err);
-        const message =
-          err instanceof Error ? err.message : "Summarization failed.";
-        await updateJob({ status: "failed", errorMessage: message });
-        send({ type: "error", message });
+        console.error("[api/summarize] error:", err);
+        const userMessage = "Terjadi kesalahan. Silakan coba lagi.";
+        await updateJob({ status: "failed", errorMessage: userMessage });
+        send({ type: "error", message: userMessage });
       } finally {
         controller.close();
       }

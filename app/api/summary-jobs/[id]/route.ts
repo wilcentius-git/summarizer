@@ -29,7 +29,7 @@ export async function DELETE(
 
     if (job.audioPath) deleteAudio(job.audioPath);
     await prisma.summaryJob.delete({
-      where: { id },
+      where: { id, userId: payload.userId },
     });
 
     return NextResponse.json({ success: true });

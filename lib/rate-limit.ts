@@ -18,23 +18,45 @@ function getClientIp(request: Request): string {
   return "unknown";
 }
 
-/**
- * In-memory per-IP rate limiter for auth endpoints.
- * Returns a NextResponse with 429 if the limit is exceeded, or null if allowed.
- */
-export function checkRateLimit(request: Request): NextResponse | null {
-  const ip = getClientIp(request);
+function consumeKey(key: string): { allowed: true } | { allowed: false; resetAt: number } {
   const now = Date.now();
-  const entry = attempts.get(ip);
+  const entry = attempts.get(key);
 
   if (!entry || now > entry.resetAt) {
-    attempts.set(ip, { count: 1, resetAt: now + windowMs });
-    return null;
+    attempts.set(key, { count: 1, resetAt: now + windowMs });
+    return { allowed: true };
   }
 
   entry.count++;
   if (entry.count > maxAttempts) {
-    const retryAfterSec = Math.ceil((entry.resetAt - now) / 1000);
+    return { allowed: false, resetAt: entry.resetAt };
+  }
+
+  return { allowed: true };
+}
+
+/**
+ * In-memory per-IP rate limiter for auth endpoints.
+ * Returns a NextResponse with 429 if the limit is exceeded, or null if allowed.
+ */
+export function checkRateLimit(request: Request): NextResponse | null;
+/**
+ * In-memory per-key rate limiter (e.g. per user for summarize).
+ * Resolves to `{ success: false }` if the limit is exceeded.
+ */
+export function checkRateLimit(key: string): Promise<{ success: boolean }>;
+export function checkRateLimit(
+  requestOrKey: Request | string
+): NextResponse | null | Promise<{ success: boolean }> {
+  if (typeof requestOrKey === "string") {
+    const result = consumeKey(requestOrKey);
+    return Promise.resolve({ success: result.allowed });
+  }
+  const ip = getClientIp(requestOrKey);
+  const result = consumeKey(ip);
+  if (!result.allowed) {
+    const now = Date.now();
+    const retryAfterSec = Math.ceil((result.resetAt - now) / 1000);
     return NextResponse.json(
       { error: "Too many attempts. Please try again later." },
       {
@@ -43,6 +65,5 @@ export function checkRateLimit(request: Request): NextResponse | null {
       }
     );
   }
-
   return null;
 }

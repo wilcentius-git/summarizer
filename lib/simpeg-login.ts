@@ -35,11 +35,7 @@ export async function loginViaSimpeg(
   const tid = setTimeout(() => controller.abort(), timeoutMs);
 
   const requestBody = JSON.stringify({ user: nip, pass });
-  const bearerPreview = bearer.slice(0, 10);
-  console.log("[Pusdatin] before fetch", {
-    bearerPreview,
-    requestBody,
-  });
+  console.log("[Pusdatin] before fetch", { nip });
 
   let res: Response;
   try {
@@ -67,10 +63,7 @@ export async function loginViaSimpeg(
     return { ok: false, reason: "bad_response" };
   }
 
-  console.log("[Pusdatin] after fetch", {
-    status: res.status,
-    body: responseText,
-  });
+  console.log("[Pusdatin] after fetch", { status: res.status });
 
   let json: unknown;
   try {

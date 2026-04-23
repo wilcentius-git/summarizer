@@ -23,6 +23,7 @@ import {
 import { audioExists, deleteAudio } from "@/lib/audio-storage";
 import { truncateSummarySections } from "@/lib/summary-format";
 import { resolveGroqApiKey } from "@/lib/resolve-groq-api-key";
+import { checkRateLimit } from "@/lib/rate-limit";
 
 /** Job with fields needed for resume (Prisma client may be out of sync with schema). */
 type ResumableJob = {
@@ -58,6 +59,14 @@ export async function POST(
     const payload = token ? await verifyToken(token) : null;
     if (!payload) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const rateLimitResult = await checkRateLimit(`resume:${payload.userId}`);
+    if (!rateLimitResult.success) {
+      return NextResponse.json(
+        { error: "Terlalu banyak permintaan. Silakan tunggu sebelum mencoba lagi." },
+        { status: 429 }
+      );
     }
 
     const { id: jobId } = await params;
@@ -515,7 +524,7 @@ export async function POST(
               send({ type: "summary", text: finalSummary });
             }
         } catch (err) {
-          console.error("Resume summarization error:", err);
+          console.error("[api/summary-jobs/resume] error:", err);
           if (isGroqRateLimitError(err)) {
             const retryAfterMs = Math.max(err.retryAfterMs, 60 * 60 * 1000);
             const retryAfter = new Date(Date.now() + retryAfterMs);
@@ -532,9 +541,9 @@ export async function POST(
             });
             return;
           }
-          const message = err instanceof Error ? err.message : "Resume failed.";
-          await updateJob({ status: "failed", errorMessage: message });
-          send({ type: "error", message });
+          const userMessage = "Terjadi kesalahan. Silakan coba lagi.";
+          await updateJob({ status: "failed", errorMessage: userMessage });
+          send({ type: "error", message: userMessage });
         } finally {
           controller.close();
         }
@@ -550,7 +559,9 @@ export async function POST(
     });
   } catch (err) {
     console.error("Resume route error:", err);
-    const message = err instanceof Error ? err.message : "Resume failed.";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json(
+      { error: "Terjadi kesalahan. Silakan coba lagi." },
+      { status: 500 }
+    );
   }
 }

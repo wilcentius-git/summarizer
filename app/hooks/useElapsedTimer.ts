@@ -9,6 +9,7 @@ export function useElapsedTimer(active: boolean): number {
   const [elapsed, setElapsed] = useState(0);
   useEffect(() => {
     if (!active) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setElapsed(0);
       return;
     }

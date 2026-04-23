@@ -44,6 +44,7 @@ export function useHistory(user: { id: string } | null) {
   useEffect(() => {
     if (user && !hasFetched.current) {
       hasFetched.current = true;
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       void fetchHistory();
     }
   }, [user, fetchHistory]);

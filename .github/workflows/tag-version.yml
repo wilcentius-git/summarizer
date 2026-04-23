@@ -1,6 +1,4 @@
-# Creates an annotated git tag vX.Y.Z from package.json when the version changes on main,
-# then publishes a GitHub Release for that tag in the same workflow.
-# (Pushes using GITHUB_TOKEN do not trigger other workflows, so release.yml does not run for these tags.)
+# Tags v* from package.json (or manual input); creates the Release here because GITHUB_TOKEN pushes do not trigger release.yml.
 name: Tag version
 
 on:
@@ -32,22 +30,15 @@ jobs:
       - name: Resolve version
         id: ver
         run: |
-          MANUAL="${{ github.event.inputs.version }}"
-          if [ -n "$MANUAL" ]; then
-            V="$MANUAL"
-          else
-            V=$(node -p "require('./package.json').version")
-          fi
-          # strip leading v if someone typed v1.2.3
-          V="${V#v}"
-          echo "version=$V" >> "$GITHUB_OUTPUT"
-          echo "tag=v${V}" >> "$GITHUB_OUTPUT"
+          V="${{ github.event.inputs.version }}"
+          [ -z "$V" ] && V=$(node -p "require('./package.json').version")
+          V="${V#v}" # strip leading v
+          { echo "version=$V"; echo "tag=v${V}"; } >> "$GITHUB_OUTPUT"
 
       - name: Create and push tag
         env:
           TAG: ${{ steps.ver.outputs.tag }}
         run: |
-          set -e
           if git ls-remote --tags origin "refs/tags/${TAG}" | grep -q .; then
             echo "Tag ${TAG} already exists on remote; skipping."
             exit 0

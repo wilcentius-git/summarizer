@@ -1,3 +1,4 @@
+# Release for tags pushed from outside GHA; tags created in tag-version.yml are released in that workflow.
 name: Release
 
 on:

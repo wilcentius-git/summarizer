@@ -96,7 +96,13 @@ export default function Home() {
           </div>
         )}
         <div className="flex items-center justify-center gap-3 mb-2">
-          <Image src={kemenkumLogo} alt="Kemenkum" width={48} height={48} />
+          <Image
+            src={kemenkumLogo}
+            alt="Kemenkum"
+            width={48}
+            height={48}
+            style={{ width: "auto", height: "auto" }}
+          />
           <h1 className="text-2xl font-bold text-kemenkum-blue">Kemenkum Summarizer</h1>
         </div>
         <p className="text-gray-600 mb-6">

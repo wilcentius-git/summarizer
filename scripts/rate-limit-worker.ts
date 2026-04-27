@@ -9,7 +9,6 @@
  */
 
 import dotenv from "dotenv";
-dotenv.config();
 dotenv.config({ path: ".env.local" });
 
 import { prisma } from "../lib/prisma";
@@ -21,7 +20,7 @@ const RETRY_AFTER_HOURS = 1;
 async function runWorkerLoop() {
   const apiKey = process.env.GROQ_API_KEY?.trim();
   if (!apiKey) {
-    console.warn("[worker] GROQ_API_KEY not set. Worker will not retry jobs. Set it in .env to enable.");
+    console.warn("[worker] GROQ_API_KEY not set. Worker will not retry jobs. Set it in .env.local to enable.");
   }
 
   while (true) {

@@ -30,23 +30,31 @@ A web app for uploading documents and audio and getting AI-generated summaries, 
    | `JWT_SECRET` | Secret for signing auth tokens (use a long random string). |
    | `GROQ_API_KEY` | Optional server-side Groq key; users can still enter **kunci groq sendiri (opsional)** in the UI. Also used by the rate-limit worker. |
    | `PUSDATIN_BEARER_TOKEN` | Bearer for Kemenkum **Simpeg login** (`login_simpeg`). The PDF signing route (`tte_sign`) uses the same e-arsip host; use the token your environment expects for those APIs. |
-   | `SEED_ADMIN_PASSWORD` | For `npx prisma db seed` (admin user). |
+   | `SEED_ADMIN_PASSWORD` | For `npx prisma db seed` (admin user). Loaded from `.env.local` (see `prisma/seed.ts`). |
 
-3. Run migrations:
+3. Start PostgreSQL (local dev, optional if you already have Postgres). From the project root:
 
    ```bash
-   npx prisma migrate deploy
+   docker compose up db -d
    ```
 
-   For local schema iteration: `npx prisma migrate dev`.
+   Point `DATABASE_URL` at the Compose `db` service, e.g. `postgresql://summarizer_user:changeme@localhost:5432/summarizer_db` (see `docker-compose.yml`). Skip this if you use another database.
 
-4. Start the app (Next.js + rate-limit worker):
+4. Run migrations (Prisma is run via a helper that loads `.env.local`):
+
+   ```bash
+   npm run db:deploy
+   ```
+
+   For local schema iteration: `npm run db:migrate`. `npm run db:push` is available for prototyping without a migration.
+
+5. **Run the app (development).** Starts Next.js and the rate-limit worker:
 
    ```bash
    npm run dev
    ```
 
-5. Open [http://localhost:3000](http://localhost:3000), sign in with **NIP** via Simpeg. Optional Groq key in the form is cached ~1 hour in the browser (`sessionStorage`).
+6. Open [http://localhost:3000](http://localhost:3000), sign in with **NIP** via Simpeg. Optional Groq key in the form is cached ~1 hour in the browser (`sessionStorage`).
 
 **Local HTTPS / Simpeg:** If Simpeg or TTE calls fail on certificate verification in dev, see comments in `.env.local.example` (never disable TLS verification in production).
 
@@ -68,7 +76,7 @@ docker compose up --build       # foreground; Ctrl+C to stop
 docker compose up -d --build    # background; docker compose down to stop
 ```
 
-Compose sets `DATABASE_URL`, `FFMPEG_PATH`, and `FFPROBE_PATH`. Add `.env` or extend `env_file` if you need `GROQ_API_KEY`, `JWT_SECRET`, or `PUSDATIN_BEARER_TOKEN` in containers.
+Compose sets `DATABASE_URL`, `FFMPEG_PATH`, and `FFPROBE_PATH`. The `app` service loads optional `env_file` from `.env.local` (same as local dev) for `GROQ_API_KEY`, `JWT_SECRET`, `PUSDATIN_BEARER_TOKEN`, and other secrets.
 
 **Image only:**
 

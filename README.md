@@ -86,12 +86,6 @@ docker build -t summarizer .
 
 The container runs `prisma migrate deploy` then `node server.js`. You must supply a valid **`DATABASE_URL`** (and other secrets) at run time—e.g. point at an external Postgres instance.
 
-## Deploy (e.g. Vercel)
-
-Provide **`DATABASE_URL`**, **`JWT_SECRET`**, and any **Pusdatin / Groq** secrets your deployment needs. Users can still paste their own Groq key in the app.
-
-`/api/summarize` does not set a long `maxDuration` in code; platform limits apply. Long jobs are easier on Docker or a long-lived Node host. **`/api/summary-jobs/[id]/resume`** sets `maxDuration = 7200` (2 hours) for large resume work where the platform honors it.
-
 ## Architecture
 
 ### Summarization flow

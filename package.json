@@ -1,15 +1,15 @@
 {
   "name": "summarizer",
-  "version": "0.29.13",
+  "version": "0.29.14",
   "private": true,
   "prisma": {
     "seed": "tsx prisma/seed.ts"
   },
   "scripts": {
-    "dev": "concurrently \"cross-env NODE_TLS_REJECT_UNAUTHORIZED=0 next dev\" \"npx tsx scripts/rate-limit-worker.ts\"",
+    "dev": "concurrently \"next dev\" \"npx tsx scripts/rate-limit-worker.ts\"",
     "build": "next build",
-    "start": "cross-env NODE_TLS_REJECT_UNAUTHORIZED=0 next start",
-    "start:all": "concurrently \"cross-env NODE_TLS_REJECT_UNAUTHORIZED=0 next start\" \"npx tsx scripts/rate-limit-worker.ts\"",
+    "start": "next start",
+    "start:all": "concurrently \"next start\" \"npx tsx scripts/rate-limit-worker.ts\"",
     "lint": "eslint .",
     "test": "vitest run",
     "test:watch": "vitest",

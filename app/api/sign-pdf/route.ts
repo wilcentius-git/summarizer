@@ -11,7 +11,7 @@ const TTE_SIGN_URL = "https://e-arsip.kemenkum.go.id/index.php/api/tte_sign";
 // (Egress Gateway) whose CA is not in Node's default trust store.
 // TODO: Replace with { ca: fs.readFileSync('certs/kemenkum-ca.pem') } once the
 // internal CA certificate is obtained from the Pusdatin/network team.
-const insecureHttpsAgent = new https.Agent({ rejectUnauthorized: false });
+const insecureHttpsAgent = new https.Agent({ rejectUnauthorized: true });
 
 function buildMultipartFormBody(
   textFields: { name: string; value: string }[],

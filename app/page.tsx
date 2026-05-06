@@ -99,9 +99,9 @@ export default function Home() {
           <Image
             src={kemenkumLogo}
             alt="Kemenkum"
-            width={48}
-            height={48}
-            style={{ width: "auto", height: "auto" }}
+            width={kemenkumLogo.width}
+            height={kemenkumLogo.height}
+            style={{ width: "auto", height: "3rem" }}
           />
           <h1 className="text-2xl font-bold text-kemenkum-blue">Kemenkum Summarizer</h1>
         </div>

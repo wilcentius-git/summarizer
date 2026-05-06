@@ -58,7 +58,6 @@ export async function POST(request: Request) {
           });
       return sendLoginResponse(user, trimmedNip);
     }
-
     const simpeg = await loginViaSimpeg(nip, pass);
     if (!simpeg.ok && simpeg.reason === "config") {
       console.error(simpeg.message);

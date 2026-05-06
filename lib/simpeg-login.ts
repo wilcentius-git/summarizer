@@ -25,6 +25,8 @@ export async function loginViaSimpeg(
   nip: string,
   pass: string
 ): Promise<SimpegLoginResult> {
+  console.log("[Pusdatin] bearer set:", !!process.env.PUSDATIN_BEARER_TOKEN);
+  console.log("[Pusdatin] TLS:", process.env.NODE_TLS_REJECT_UNAUTHORIZED);
   const bearer = process.env.PUSDATIN_BEARER_TOKEN;
   if (!bearer) {
     return { ok: false, reason: "config", message: "PUSDATIN_BEARER_TOKEN is not set" };

@@ -52,3 +52,11 @@ model SummaryJob {
 
   @@map("summary_jobs")
 }
+
+model ApiKey {
+  id        String    @id @default(cuid())
+  key       String    @unique
+  name      String
+  createdAt DateTime  @default(now())
+  lastUsed  DateTime?
+}

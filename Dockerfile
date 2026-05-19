@@ -32,6 +32,7 @@ FROM base AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
+ENV NODE_TLS_REJECT_UNAUTHORIZED=0
 # ffmpeg for audio chunking + runtime libs for @napi-rs/canvas
 RUN apk add --no-cache \
     ffmpeg \

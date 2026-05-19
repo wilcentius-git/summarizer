@@ -8,7 +8,7 @@ import { useAuth } from "@/app/contexts/AuthContext";
 import { useGroqApiKey } from "@/app/hooks/useGroqApiKey";
 import { useHistory } from "@/app/hooks/useHistory";
 import { useSummarize } from "@/app/hooks/useSummarize";
-import { useFileUpload, formatSize } from "@/app/components/FileUpload";
+import { useFileUpload, formatSize, FILE_UPLOAD_DROP_HINT } from "@/app/components/FileUpload";
 import { ProgressDisplay } from "@/app/components/ProgressDisplay";
 import { HistoryPanel } from "@/app/components/HistoryPanel";
 import { RawResult } from "@/app/components/RawResult";
@@ -106,7 +106,7 @@ export default function Home() {
           <h1 className="text-2xl font-bold text-kemenkum-blue">Kemenkum Summarizer</h1>
         </div>
         <p className="text-gray-600 mb-6">
-          Unggah dokumen (PDF, DOCX, TXT, RTF, ODT, SRT) atau audio (MP3, WAV, M4A) untuk diringkas.
+          Unggah file audio untuk diringkas.
         </p>
 
         <details className="w-full max-w-md mx-auto mb-6 group">
@@ -161,12 +161,10 @@ export default function Home() {
               onChange={(e) => addFiles(e.target.files)}
             />
             <span className="inline-block px-10 py-3 rounded-2xl bg-kemenkum-blue text-white font-medium text-base hover:opacity-90">
-              Pilih file dokumen
+              Pilih file audio
             </span>
           </label>
-          <p className="text-sm text-gray-600">
-            atau jatuhkan file di sini (PDF, DOCX, TXT, RTF, ODT, SRT, MP3, WAV, M4A)
-          </p>
+          <p className="text-sm text-gray-600">{FILE_UPLOAD_DROP_HINT}</p>
         </div>
 
         {success && (

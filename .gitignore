@@ -17,6 +17,9 @@
 *.pem
 /case_example
 
+# documentation (local screenshots)
+documentation/screenshots/
+
 # debug
 npm-debug.log*
 yarn-debug.log*

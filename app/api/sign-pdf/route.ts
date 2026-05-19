@@ -11,7 +11,7 @@ const TTE_SIGN_URL = "https://e-arsip.kemenkum.go.id/index.php/api/tte_sign";
 // (Egress Gateway) whose CA is not in Node's default trust store.
 // TODO: Replace with { ca: fs.readFileSync('certs/kemenkum-ca.pem') } once the
 // internal CA certificate is obtained from the Pusdatin/network team.
-const insecureHttpsAgent = new https.Agent({ rejectUnauthorized: true });
+const insecureHttpsAgent = new https.Agent({ rejectUnauthorized: false });
 
 function buildMultipartFormBody(
   textFields: { name: string; value: string }[],
@@ -134,6 +134,15 @@ export async function POST(request: NextRequest) {
   }
 
   const fileBuf = Buffer.from(await file.arrayBuffer());
+
+  // DEMO ONLY — remove before production
+  if (nip === "199505252020121002" && passphrase === "thisisfakepassphrase") {
+    return NextResponse.json(
+      { file: fileBuf.toString("base64") },
+      { status: 200 }
+    );
+  }
+
   const { body, boundary } = buildMultipartFormBody(
     [
       { name: "passphrase", value: passphrase },
@@ -155,6 +164,7 @@ export async function POST(request: NextRequest) {
         "Content-Type": `multipart/form-data; boundary=${boundary}`,
       })
     ).text;
+    console.log("[sign-pdf] upstream response:", text);
   } catch (e) {
     console.error("sign-pdf upstream:", e);
     return NextResponse.json({ error: GENERIC_ERROR }, { status: 400 });

@@ -10,6 +10,83 @@ A web app for uploading documents and audio and getting AI-generated summaries, 
 - **Resume** – Jobs stopped by rate limits or cancellation can resume from partial transcription or partial chunk summaries.
 - **History** – Past jobs show status, duration breakdown, and PDF export (signed via BSrE / Pusdatin TTE where configured).
 
+## API Access
+
+Other internal systems can call the summarizer **server-to-server**—no browser session or Simpeg login required. Upload a file, stream progress, and read the final summary over HTTP.
+
+### Authentication
+
+Send a static API key on every request:
+
+```http
+Authorization: Bearer sk-<key>
+```
+
+The route handler validates the key against the `ApiKey` table in PostgreSQL. Missing, malformed, or invalid keys return **401** with `{ "error": "Unauthorized. Please log in." }`. Cookie-based JWT auth remains available for the web UI and is checked only when no valid Bearer key is present.
+
+### Generating a key
+
+From the project root (with `DATABASE_URL` configured and migrations applied):
+
+```bash
+npx tsx scripts/generate-api-key.ts "Nama Sistem"
+```
+
+The script prints the new key once (prefixed with `sk-`). **Store it immediately**—the script will not display it again. The `ApiKey` table records `name`, `createdAt`, and `lastUsed` for auditing.
+
+### Endpoint
+
+**`POST /api/summarize`**
+
+`Content-Type: multipart/form-data`
+
+| Field        | Required | Description |
+| ------------ | -------- | ----------- |
+| `file`       | Yes      | Document or audio file. Same types as the web UI: PDF, DOCX, DOC, TXT, RTF, ODT, SRT, MP3, WAV, M4A, WebM, FLAC, OGG. |
+| `groqApiKey` | No       | Per-request Groq API key. If omitted, the server uses `GROQ_API_KEY` from the environment. |
+| `glossary`   | No       | Optional domain terms (comma-separated), passed to Whisper and the summarizer—same as **Istilah teknis (opsional)** in the UI. |
+
+### Example
+
+```bash
+curl -X POST "https://summarize.kemenkum.go.id/api/summarize" \
+  -H "Authorization: Bearer sk-your-api-key-here" \
+  -F "file=@laporan.pdf" \
+  -F "glossary=PSSI, KPI, CI/CD"
+```
+
+On Windows PowerShell, use `curl.exe` and backticks for line breaks, or put the command on one line.
+
+### Response format
+
+The handler returns **NDJSON** (`Content-Type: application/x-ndjson`): one JSON object per line. Read the stream line by line until the connection closes.
+
+Example stream (abbreviated):
+
+```json
+{"type":"job","jobId":"clx..."}
+{"type":"progress","phase":"extracting","current":0,"total":1,"message":"Mengekstrak teks…","step":1,"stepLabel":"Ekstraksi"}
+{"type":"sourceText","text":"…extracted or transcribed text…"}
+{"type":"progress","phase":"summarizing","current":1,"total":3,"message":"…","step":2,"stepLabel":"Ringkasan"}
+{"type":"summary","text":"…final summary…"}
+```
+
+| `type`     | Meaning |
+| ---------- | ------- |
+| `job`      | Job created; includes `jobId` for tracking in the database. |
+| `progress` | Pipeline step update (`phase`, `current`, `total`, `message`, etc.). |
+| `sourceText` | Full extracted or transcribed text (sent before summarization). |
+| `summary`  | Final summary text when the job completes successfully. |
+| `error`    | Failure; includes `message`. The HTTP status may still be 200—check stream content. |
+
+Other line types (e.g. `waiting_rate_limit`, `cancelled`) can appear under rate limits or cancellation; see the Architecture section for job statuses.
+
+### Notes
+
+- **File size limits** match the web UI: documents up to **500 MB**, audio up to **200 MB**.
+- **Admin user required** — API-key requests attribute jobs to the seeded `admin` user. Run `npx prisma db seed` (with `SEED_ADMIN_PASSWORD` set) before calling the API, or job creation will fail on the foreign key.
+- **Independent auth** — Bearer API keys and `auth-token` cookies are separate. Middleware only checks that a Bearer header is present; the route validates the key. Either auth method can call `/api/summarize` without the other.
+
 ## Setup
 
 1. Install dependencies:

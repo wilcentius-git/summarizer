@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 
 import { prisma } from "@/lib/prisma";
 import { verifyToken } from "@/lib/auth";
+import { validateApiKey } from "@/lib/api-key";
 import {
   extractText,
   isSupportedFileName,
@@ -47,9 +48,22 @@ function toFileType(fileName: string, isAudio: boolean): "mp3" | "pdf" | "docx" 
 }
 
 export async function POST(request: NextRequest) {
-  const cookieStore = await cookies();
-  const token = cookieStore.get("auth-token")?.value;
-  const payload = token ? await verifyToken(token) : null;
+  let payload: { userId: string; email: string } | null = null;
+
+  const authHeader = request.headers.get("authorization");
+  if (authHeader?.startsWith("Bearer ")) {
+    const apiKeyRecord = await validateApiKey(authHeader.slice(7));
+    if (apiKeyRecord) {
+      payload = { userId: "admin", email: `api-key:${apiKeyRecord.name}` };
+    }
+  }
+
+  if (!payload) {
+    const cookieStore = await cookies();
+    const token = cookieStore.get("auth-token")?.value;
+    payload = token ? await verifyToken(token) : null;
+  }
+
   if (!payload) {
     return NextResponse.json({ error: "Unauthorized. Please log in." }, { status: 401 });
   }

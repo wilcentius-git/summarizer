@@ -6,6 +6,12 @@ import { getJwtSecretKey } from "@/lib/jwt-secret";
 const PUBLIC_PATHS = ["/login", "/register"];
 const AUTH_PATHS = ["/login", "/register"];
 
+function hasBearerToken(request: NextRequest): boolean {
+  const authHeader = request.headers.get("authorization");
+  if (!authHeader?.startsWith("Bearer ")) return false;
+  return authHeader.slice(7).trim().length > 0;
+}
+
 async function verifyAuth(request: NextRequest): Promise<boolean> {
   const token = request.cookies.get("auth-token")?.value;
   if (!token) return false;
@@ -24,6 +30,10 @@ export async function middleware(request: NextRequest) {
   const isApiAuth = pathname.startsWith("/api/auth");
 
   if (isApiAuth) {
+    return NextResponse.next();
+  }
+
+  if (hasBearerToken(request)) {
     return NextResponse.next();
   }
 

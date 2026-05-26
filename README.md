@@ -12,7 +12,7 @@ A web app for uploading documents and audio and getting AI-generated summaries, 
 
 ## API Access
 
-Other internal systems can call the summarizer **server-to-server**—no browser session or Simpeg login required. Upload a file, stream progress, and read the final summary over HTTP.
+Other internal systems can call the summarizer **server-to-server**, no browser session or Simpeg login required. Upload a file, stream progress, and read the final summary over HTTP.
 
 ### Authentication
 
@@ -32,7 +32,7 @@ From the project root (with `DATABASE_URL` configured and migrations applied):
 npx tsx scripts/generate-api-key.ts "Nama Sistem"
 ```
 
-The script prints the new key once (prefixed with `sk-`). **Store it immediately**—the script will not display it again. The `ApiKey` table records `name`, `createdAt`, and `lastUsed` for auditing.
+The script prints the new key once (prefixed with `sk-`). **Store it immediately**, the script will not display it again. The `ApiKey` table records `name`, `createdAt`, and `lastUsed` for auditing.
 
 ### Endpoint
 
@@ -44,7 +44,7 @@ The script prints the new key once (prefixed with `sk-`). **Store it immediately
 | ------------ | -------- | ----------- |
 | `file`       | Yes      | Document or audio file. Same types as the web UI: PDF, DOCX, DOC, TXT, RTF, ODT, SRT, MP3, WAV, M4A, WebM, FLAC, OGG. |
 | `groqApiKey` | No       | Per-request Groq API key. If omitted, the server uses `GROQ_API_KEY` from the environment. |
-| `glossary`   | No       | Optional domain terms (comma-separated), passed to Whisper and the summarizer—same as **Istilah teknis (opsional)** in the UI. |
+| `glossary`   | No       | Optional domain terms (comma-separated), passed to Whisper and the summarizer, same as **Istilah teknis (opsional)** in the UI. |
 
 ### Example
 
@@ -77,15 +77,15 @@ Example stream (abbreviated):
 | `progress` | Pipeline step update (`phase`, `current`, `total`, `message`, etc.). |
 | `sourceText` | Full extracted or transcribed text (sent before summarization). |
 | `summary`  | Final summary text when the job completes successfully. |
-| `error`    | Failure; includes `message`. The HTTP status may still be 200—check stream content. |
+| `error`    | Failure; includes `message`. The HTTP status may still be 200; check stream content. |
 
 Other line types (e.g. `waiting_rate_limit`, `cancelled`) can appear under rate limits or cancellation; see the Architecture section for job statuses.
 
 ### Notes
 
 - **File size limits** match the web UI: documents up to **500 MB**, audio up to **200 MB**.
-- **Admin user required** — API-key requests attribute jobs to the seeded `admin` user. Run `npx prisma db seed` (with `SEED_ADMIN_PASSWORD` set) before calling the API, or job creation will fail on the foreign key.
-- **Independent auth** — Bearer API keys and `auth-token` cookies are separate. Middleware only checks that a Bearer header is present; the route validates the key. Either auth method can call `/api/summarize` without the other.
+- **Admin user required**, API-key requests attribute jobs to the seeded `admin` user. Run `npx prisma db seed` (with `SEED_ADMIN_PASSWORD` set) before calling the API, or job creation will fail on the foreign key.
+- **Independent auth**, Bearer API keys and `auth-token` cookies are separate. Middleware only checks that a Bearer header is present; the route validates the key. Either auth method can call `/api/summarize` without the other.
 
 ## Setup
 
@@ -124,6 +124,16 @@ Other line types (e.g. `waiting_rate_limit`, `cancelled`) can appear under rate 
 
 **Local HTTPS / Simpeg:** If Simpeg or TTE calls fail on certificate verification in dev, see comments in `.env.local.example` (never disable TLS verification in production).
 
+## Whitelist
+
+Simpeg login is restricted to NIPs stored in the `whitelist` table. After Simpeg accepts credentials, the app checks that the canonical NIP exists in the whitelist; if not, login returns **403** with a message that the account is not on the access list. The login page shows that message for 403 and **NIP atau kata sandi tidak valid.** for 401.
+
+**Admin local account**, The seeded `admin` user (`SEED_ADMIN_PASSWORD`, `npx prisma db seed`) signs in with NIP `admin` and the local password only. It does not call Simpeg and is **not** subject to the whitelist check.
+
+**Managing the list**, Sign in as an admin user, then use the **gear** icon (top right on the main app page, next to logout) to open [`/admin/whitelist`](http://localhost:3000/admin/whitelist). There you can add NIPs and remove entries from the table. Changes take effect on the next Simpeg login attempt.
+
+Admin API routes (same cookie JWT, `isAdmin` required): `GET` / `POST` `/api/admin/whitelist`, `DELETE` `/api/admin/whitelist/[nip]`.
+
 ## Build
 
 ```bash
@@ -150,7 +160,7 @@ Compose sets `DATABASE_URL`, `FFMPEG_PATH`, and `FFPROBE_PATH`. The `app` servic
 docker build -t summarizer .
 ```
 
-The container runs `prisma migrate deploy` then `node server.js`. You must supply a valid `**DATABASE_URL**` (and other secrets) at run time—e.g. point at an external Postgres instance.
+The container runs `prisma migrate deploy` then `node server.js`. You must supply a valid `**DATABASE_URL**` (and other secrets) at run time, e.g. point at an external Postgres instance.
 
 ## Architecture
 
@@ -163,10 +173,10 @@ The container runs `prisma migrate deploy` then `node server.js`. You must suppl
   - **ODT**: adm-zip + XML  
   - **SRT**: custom parser  
   - **PDF**: pdf-parse; OCR fallback if text is empty or very short (< 50 chars)  
-  - **Audio**: Groq Whisper; files over **~5 min** or **~8 MB** are split with ffmpeg (~4 min segments, **2 s** overlap)—see `lib/audio-chunking.ts`
+  - **Audio**: Groq Whisper; files over **~5 min** or **~8 MB** are split with ffmpeg (~4 min segments, **2 s** overlap), see `lib/audio-chunking.ts`
 2. **PDF OCR** (when needed): `pdf-to-img` → Groq Vision (`meta-llama/llama-4-scout-17b-16e-instruct`), max **20** pages, `[Halaman N]` markers.
 3. **Chunking** – Long text is split at natural boundaries. Default summarize chunk size is **~4,500** characters with **~6 s** between chunk requests and header-based pacing (`lib/summarize-pipeline.ts` → `SUMMARIZE_PIPELINE_STANDARD`).
-4. **Merge** – Chunk summaries are merged in one or more Groq rounds. **429 / 524** responses are retried using API hints (e.g. `Retry-After`, message parsing) and configured delays between merge batches—not a single global “exponential backoff” policy everywhere.
+4. **Merge** – Chunk summaries are merged in one or more Groq rounds. **429 / 524** responses are retried using API hints (e.g. `Retry-After`, message parsing) and configured delays between merge batches, not a single global “exponential backoff” policy everywhere.
 5. **Streaming** – NDJSON lines: `progress`, `sourceText` (when applicable), `summary`, `error`.
 
 ### Job lifecycle
@@ -211,7 +221,7 @@ Partial work can be resumed from history (**Lanjutkan**) when the backend still 
 
 - **Frontend:** Next.js 16 (App Router), React 18, TypeScript, Tailwind CSS  
 - **Backend / DB:** Prisma, **PostgreSQL** (`DATABASE_URL`)  
-- **Auth:** JWT; **Simpeg** login (`lib/simpeg-login.ts`) with NIP  
+- **Auth:** JWT; **Simpeg** login (`lib/simpeg-login.ts`) with NIP; **whitelist** gate for Simpeg users (`Whitelist` model)  
 - **AI:** Groq — Whisper for transcription, LLaMA for summarization (see Models)  
 - **PDF:** pdf-parse; pdf-to-img + **@napi-rs/canvas** for OCR rasterization  
 - **Documents:** mammoth, rtf-parser, adm-zip  

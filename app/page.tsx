@@ -1,6 +1,8 @@
 "use client";
 
 import Image from "next/image";
+import { Settings } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useCallback, useRef, useState } from "react";
 
 import kemenkumLogo from "@/assets/kemenkum_logo.png";
@@ -15,6 +17,7 @@ import { RawResult } from "@/app/components/RawResult";
 import { ResumeCard } from "@/app/components/ResumeCard";
 
 export default function Home() {
+  const router = useRouter();
   const { user, logout } = useAuth();
   const { groqApiKey, setGroqApiKey } = useGroqApiKey();
   const [error, setError] = useState<string | null>(null);
@@ -71,28 +74,40 @@ export default function Home() {
             <span className="text-base text-kemenkum-blue font-medium truncate">
               {user.name?.trim() || user.email}
             </span>
-            <button
-              type="button"
-              onClick={logout}
-              aria-label="Logout"
-              className="p-2 rounded-lg text-kemenkum-blue hover:opacity-80 shrink-0"
-            >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="24"
-                height="24"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
+            <div className="flex items-center shrink-0">
+              {user.isAdmin && (
+                <button
+                  type="button"
+                  onClick={() => router.push("/admin/whitelist")}
+                  aria-label="Admin settings"
+                  className="p-2 rounded-lg text-kemenkum-blue hover:opacity-80 shrink-0"
+                >
+                  <Settings size={24} strokeWidth={2.5} />
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={logout}
+                aria-label="Logout"
+                className="p-2 rounded-lg text-kemenkum-blue hover:opacity-80 shrink-0"
               >
-                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-                <polyline points="16 17 21 12 16 7" />
-                <line x1="21" y1="12" x2="9" y2="12" />
-              </svg>
-            </button>
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="24"
+                  height="24"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                  <polyline points="16 17 21 12 16 7" />
+                  <line x1="21" y1="12" x2="9" y2="12" />
+                </svg>
+              </button>
+            </div>
           </div>
         )}
         <div className="flex items-center justify-center gap-3 mb-2">

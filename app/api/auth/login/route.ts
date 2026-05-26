@@ -80,6 +80,19 @@ export async function POST(request: Request) {
     }
 
     const canonicalNip = simpeg.nip.trim();
+    const whitelisted = await prisma.whitelist.findUnique({
+      where: { nip: canonicalNip },
+    });
+    if (!whitelisted) {
+      return NextResponse.json(
+        {
+          error:
+            "Akun Anda tidak terdaftar dalam daftar akses. Hubungi administrator.",
+        },
+        { status: 403 }
+      );
+    }
+
     const user = await ensureUserForNip(canonicalNip, simpeg.name);
     return sendLoginResponse(user, canonicalNip);
   } catch (err) {

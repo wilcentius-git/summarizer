@@ -30,7 +30,16 @@ function LoginForm() {
       });
       const data = await res.json();
       if (!res.ok) {
-        setError(data.error || "Login failed");
+        if (res.status === 403) {
+          setError(
+            data.error ||
+              "Akun Anda tidak terdaftar dalam daftar akses. Hubungi administrator."
+          );
+        } else if (res.status === 401) {
+          setError("NIP atau kata sandi tidak valid.");
+        } else {
+          setError(data.error || "Login failed");
+        }
         return;
       }
       await refresh();

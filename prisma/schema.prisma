@@ -60,3 +60,10 @@ model ApiKey {
   createdAt DateTime  @default(now())
   lastUsed  DateTime?
 }
+
+model Whitelist {
+  nip       String   @id
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("whitelist")
+}

@@ -27,6 +27,7 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN npm run build
+RUN echo "=== prisma folder contents ===" && ls -la /app/prisma && ls -la /app/prisma/migrations || echo "migrations folder missing"
 
 FROM base AS runner
 WORKDIR /app
@@ -44,6 +45,7 @@ RUN apk add --no-cache \
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 COPY --from=builder /app/prisma ./prisma
+COPY --from=builder /app/prisma/migrations ./prisma/migrations
 COPY --from=deps /app/node_modules ./node_modules
 EXPOSE 3000
 ENV PORT=3000

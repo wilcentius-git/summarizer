@@ -1,5 +1,6 @@
 "use client";
 
+import { version } from "../../package.json";
 import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Image from "next/image";
@@ -108,6 +109,7 @@ function LoginForm() {
           >
             {loading ? "Memproses…" : "Masuk"}
           </button>
+          <p className="text-center text-xs text-gray-400 mt-3">v{version}</p>
         </form>
       </div>
     </main>

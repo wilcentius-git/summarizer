@@ -1,6 +1,6 @@
 {
   "name": "summarizer",
-  "version": "0.30.2",
+  "version": "0.30.3",
   "private": true,
   "prisma": {
     "seed": "tsx prisma/seed.ts"

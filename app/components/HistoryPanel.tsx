@@ -206,6 +206,9 @@ export function HistoryPanel({
                       <p className="font-medium text-gray-900 truncate">{job.filename}</p>
                       <p className="text-xs text-gray-500">
                         {new Date(job.uploadTime).toLocaleString("id-ID")} • {job.fileType.toUpperCase()}
+                        {job.userId && job.userId !== user?.id && job.ownerName && (
+                          <> • {job.ownerName}</>
+                        )}
                       </p>
                       <span
                         className={`inline-block mt-1 px-2 py-0.5 rounded text-xs font-medium group cursor-default ${

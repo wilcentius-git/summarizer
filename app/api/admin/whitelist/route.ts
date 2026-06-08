@@ -10,6 +10,7 @@ export async function GET() {
 
     const entries = await prisma.whitelist.findMany({
       orderBy: { createdAt: "desc" },
+      include: { satuanKerja: true },
     });
 
     return NextResponse.json({ entries });
@@ -35,7 +36,18 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: firstError }, { status: 400 });
     }
 
-    const nip = parsed.data.nip;
+    const { nip, satuanKerjaId } = parsed.data;
+
+    const unit = await prisma.satuanKerja.findUnique({
+      where: { id: satuanKerjaId },
+      select: { id: true },
+    });
+    if (!unit) {
+      return NextResponse.json(
+        { error: "Satuan kerja tidak ditemukan" },
+        { status: 400 }
+      );
+    }
 
     const existing = await prisma.whitelist.findUnique({ where: { nip } });
     if (existing) {
@@ -45,7 +57,10 @@ export async function POST(request: Request) {
       );
     }
 
-    const entry = await prisma.whitelist.create({ data: { nip } });
+    const entry = await prisma.whitelist.create({
+      data: { nip, satuanKerjaId },
+      include: { satuanKerja: true },
+    });
     return NextResponse.json(entry, { status: 201 });
   } catch (err) {
     console.error("Whitelist create error:", err);

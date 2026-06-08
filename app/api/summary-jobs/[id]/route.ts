@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { prisma } from "@/lib/prisma";
 import { verifyToken } from "@/lib/auth";
 import { deleteAudio } from "@/lib/audio-storage";
+import { jobVisibilityWhere } from "@/lib/job-visibility";
 
 export async function DELETE(
   _request: NextRequest,
@@ -17,9 +18,10 @@ export async function DELETE(
     }
 
     const { id } = await params;
+    const visibility = await jobVisibilityWhere(payload.userId);
 
     const job = await prisma.summaryJob.findFirst({
-      where: { id, userId: payload.userId },
+      where: { id, ...visibility },
       select: { id: true, audioPath: true },
     });
 
@@ -28,9 +30,7 @@ export async function DELETE(
     }
 
     if (job.audioPath) deleteAudio(job.audioPath);
-    await prisma.summaryJob.delete({
-      where: { id, userId: payload.userId },
-    });
+    await prisma.summaryJob.delete({ where: { id: job.id } });
 
     return NextResponse.json({ success: true });
   } catch (err) {

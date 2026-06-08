@@ -24,6 +24,11 @@ const admins = [
   },
 ];
 
+const satuanKerjaEntries = [
+  { id: "tu-menteri", name: "TU Menteri" },
+  { id: "tu-sekjen", name: "TU Sekjen" },
+];
+
 async function main() {
   console.log("Seeding admin users...");
 
@@ -45,6 +50,17 @@ async function main() {
       },
     });
     console.log(`✔ Admin user seeded: ${id}`);
+  }
+
+  console.log("Seeding satuan kerja...");
+
+  for (const unit of satuanKerjaEntries) {
+    await prisma.satuanKerja.upsert({
+      where: { id: unit.id },
+      create: { id: unit.id, name: unit.name },
+      update: { name: unit.name },
+    });
+    console.log(`✔ Satuan kerja seeded: ${unit.name}`);
   }
 
   console.log("Done.");

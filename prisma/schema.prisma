@@ -61,9 +61,20 @@ model ApiKey {
   lastUsed  DateTime?
 }
 
+model SatuanKerja {
+  id         String      @id @default(cuid())
+  name       String      @unique
+  createdAt  DateTime    @default(now()) @map("created_at")
+  whitelists Whitelist[]
+
+  @@map("satuan_kerja")
+}
+
 model Whitelist {
-  nip       String   @id
-  createdAt DateTime @default(now()) @map("created_at")
+  nip            String       @id
+  createdAt      DateTime     @default(now()) @map("created_at")
+  satuanKerjaId  String?      @map("satuan_kerja_id")
+  satuanKerja    SatuanKerja? @relation(fields: [satuanKerjaId], references: [id])
 
   @@map("whitelist")
 }

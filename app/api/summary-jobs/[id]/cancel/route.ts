@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 
 import { prisma } from "@/lib/prisma";
 import { verifyToken } from "@/lib/auth";
+import { jobVisibilityWhere } from "@/lib/job-visibility";
 
 export async function POST(
   _request: NextRequest,
@@ -17,11 +18,12 @@ export async function POST(
     }
 
     const { id: jobId } = await params;
+    const visibility = await jobVisibilityWhere(payload.userId);
 
     const updated = await prisma.summaryJob.updateMany({
       where: {
         id: jobId,
-        userId: payload.userId,
+        ...visibility,
         status: { not: "completed" },
       },
       data: { status: "cancelled" },
@@ -31,9 +33,8 @@ export async function POST(
       return NextResponse.json({ success: true });
     }
 
-    // No row updated: not found, wrong owner, or already completed — disambiguate for HTTP semantics.
     const job = await prisma.summaryJob.findFirst({
-      where: { id: jobId, userId: payload.userId },
+      where: { id: jobId, ...visibility },
     });
     if (!job) {
       return NextResponse.json({ error: "Job not found" }, { status: 404 });

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { prisma } from "@/lib/prisma";
 import { verifyToken } from "@/lib/auth";
+import { jobVisibilityWhere } from "@/lib/job-visibility";
 
 export async function GET() {
   try {
@@ -12,11 +13,14 @@ export async function GET() {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    const visibility = await jobVisibilityWhere(payload.userId);
+
     const rows = await prisma.summaryJob.findMany({
-      where: { userId: payload.userId },
+      where: visibility,
       orderBy: { uploadTime: "desc" },
       select: {
         id: true,
+        userId: true,
         filename: true,
         fileType: true,
         uploadTime: true,
@@ -37,12 +41,23 @@ export async function GET() {
         summarizeDurationMs: true,
         mergeDurationMs: true,
         completedAt: true,
+        user: { select: { name: true } },
       },
     });
 
     const jobs = rows.map(
-      ({ extractedTextForRetry, audioPath, partialTranscript, sourceText, ...rest }) => ({
+      ({
+        extractedTextForRetry,
+        audioPath,
+        partialTranscript,
+        sourceText,
+        user,
+        userId,
+        ...rest
+      }) => ({
         ...rest,
+        userId,
+        ownerName: user.name?.trim() || userId,
         sourceText:
           sourceText?.trim() || extractedTextForRetry?.trim() || null,
         isResumable:

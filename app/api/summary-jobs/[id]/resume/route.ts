@@ -24,6 +24,7 @@ import { audioExists, deleteAudio } from "@/lib/audio-storage";
 import { truncateSummarySections } from "@/lib/summary-format";
 import { resolveGroqApiKey } from "@/lib/resolve-groq-api-key";
 import { checkRateLimit } from "@/lib/rate-limit";
+import { jobVisibilityWhere } from "@/lib/job-visibility";
 
 /** Job with fields needed for resume (Prisma client may be out of sync with schema). */
 type ResumableJob = {
@@ -70,9 +71,10 @@ export async function POST(
     }
 
     const { id: jobId } = await params;
+    const visibility = await jobVisibilityWhere(payload.userId);
 
     const job = await prisma.summaryJob.findFirst({
-      where: { id: jobId, userId: payload.userId },
+      where: { id: jobId, ...visibility },
     });
 
     if (!job) {
@@ -143,7 +145,7 @@ export async function POST(
     const claimResult = await prisma.summaryJob.updateMany({
       where: {
         id: jobId,
-        userId: payload.userId,
+        ...visibility,
         status: { in: [...resumableStatuses] },
       },
       data: { status: "processing" },
@@ -151,7 +153,7 @@ export async function POST(
 
     if (claimResult.count === 0) {
       const latest = await prisma.summaryJob.findFirst({
-        where: { id: jobId, userId: payload.userId },
+        where: { id: jobId, ...visibility },
       });
       if (!latest) {
         return NextResponse.json({ error: "Job not found" }, { status: 404 });

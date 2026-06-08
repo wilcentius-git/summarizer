@@ -4,6 +4,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 export type SummaryJobItem = {
   id: string;
+  userId?: string;
+  ownerName?: string;
   filename: string;
   fileType: string;
   /** Extracted / transcribed text for display (from DB or legacy retry field). */

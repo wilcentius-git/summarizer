@@ -11,4 +11,17 @@ export const whitelistNipSchema = z.object({
     .trim()
     .min(1, "NIP is required")
     .max(30, "NIP tidak valid"),
+  satuanKerjaId: z.string().trim().min(1, "Satuan kerja wajib dipilih"),
+});
+
+export const satuanKerjaNameSchema = z.object({
+  name: z
+    .string()
+    .trim()
+    .min(1, "Nama satuan kerja wajib diisi")
+    .max(200, "Nama terlalu panjang"),
+});
+
+export const whitelistSatuanKerjaSchema = z.object({
+  satuanKerjaId: z.string().trim().min(1, "Satuan kerja wajib dipilih"),
 });

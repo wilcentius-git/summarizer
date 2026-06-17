@@ -318,6 +318,21 @@ export function HistoryPanel({
                   {modal.type === "transkrip" ? "Transkrip" : "Rangkuman"}
                 </h2>
                 <div className="flex items-center gap-2">
+                  {user?.isAdmin && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const text =
+                          modal.type === "transkrip"
+                            ? modal.job.sourceText!
+                            : modal.job.summaryText!;
+                        navigator.clipboard.writeText(text);
+                      }}
+                      className="flex items-center gap-2 rounded-md bg-gray-100 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-200 transition-colors"
+                    >
+                      Salin
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={async () => {
@@ -364,38 +379,16 @@ export function HistoryPanel({
                 onContextMenu={(e) => e.preventDefault()}
               >
                 {modal.type === "transkrip" ? (
-                  <>
-                    <RawResult
-                      label=""
-                      text={modal.job.sourceText!}
-                    />
-                    {user?.isAdmin && (
-                      <button
-                        onClick={() => {
-                          navigator.clipboard.writeText(modal.job.sourceText!);
-                        }}
-                        className="mt-3 flex items-center gap-2 rounded-md bg-gray-100 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-200 transition-colors"
-                      >
-                        Salin Transkrip
-                      </button>
-                    )}
-                  </>
+                  <RawResult
+                    label=""
+                    text={modal.job.sourceText!}
+                  />
                 ) : (
                   <div className="text-left [&_*]:text-left">
                     <SummaryMarkdownBody
                       text={modal.job.summaryText!}
                       className="rounded-lg bg-gray-50"
                     />
-                    {user?.isAdmin && (
-                      <button
-                        onClick={() => {
-                          navigator.clipboard.writeText(modal.job.summaryText!);
-                        }}
-                        className="mt-3 flex items-center gap-2 rounded-md bg-gray-100 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-200 transition-colors"
-                      >
-                        Salin Rangkuman
-                      </button>
-                    )}
                   </div>
                 )}
               </div>

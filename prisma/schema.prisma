@@ -64,6 +64,7 @@ model ApiKey {
 model SatuanKerja {
   id         String      @id @default(cuid())
   name       String      @unique
+  groqApiKey String?     @map("groq_api_key")
   createdAt  DateTime    @default(now()) @map("created_at")
   whitelists Whitelist[]
 

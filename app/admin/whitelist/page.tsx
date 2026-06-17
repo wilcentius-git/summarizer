@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, ChevronDown, ChevronRight, X } from "lucide-react";
+import { ArrowLeft, ChevronDown, ChevronRight, Pencil, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { useAuth } from "@/app/contexts/AuthContext";
@@ -9,6 +9,7 @@ type SatuanKerjaOption = {
   id: string;
   name: string;
   createdAt: string;
+  groqApiKeyMasked?: string | null;
 };
 
 type WhitelistEntry = {
@@ -35,10 +36,15 @@ export default function AdminWhitelistPage() {
 
   const [satuanKerjaExpanded, setSatuanKerjaExpanded] = useState(false);
   const [unitNameInput, setUnitNameInput] = useState("");
+  const [unitGroqKeyInput, setUnitGroqKeyInput] = useState("");
   const [unitAddLoading, setUnitAddLoading] = useState(false);
   const [unitAddError, setUnitAddError] = useState<string | null>(null);
   const [deletingUnitId, setDeletingUnitId] = useState<string | null>(null);
   const [unitDeleteError, setUnitDeleteError] = useState<string | null>(null);
+  const [groqKeyInputs, setGroqKeyInputs] = useState<Record<string, string>>({});
+  const [editingUnitId, setEditingUnitId] = useState<string | null>(null);
+  const [savingGroqKeyUnitId, setSavingGroqKeyUnitId] = useState<string | null>(null);
+  const [groqKeySaveError, setGroqKeySaveError] = useState<string | null>(null);
 
   const [entries, setEntries] = useState<WhitelistEntry[]>([]);
   const [listLoading, setListLoading] = useState(true);
@@ -108,8 +114,13 @@ export default function AdminWhitelistPage() {
     e.preventDefault();
     setUnitAddError(null);
     const trimmed = unitNameInput.trim();
+    const groqKeyTrimmed = unitGroqKeyInput.trim();
     if (!trimmed) {
       setUnitAddError("Nama satuan kerja wajib diisi");
+      return;
+    }
+    if (!groqKeyTrimmed) {
+      setUnitAddError("Groq API key wajib diisi");
       return;
     }
 
@@ -119,7 +130,7 @@ export default function AdminWhitelistPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ name: trimmed }),
+        body: JSON.stringify({ name: trimmed, groqApiKey: groqKeyTrimmed }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -127,11 +138,56 @@ export default function AdminWhitelistPage() {
         return;
       }
       setUnitNameInput("");
-      await fetchUnits({ silent: true });
+      setUnitGroqKeyInput("");
+      if (data.unit) {
+        setUnits((prev) =>
+          [...prev, data.unit].sort((a, b) => a.name.localeCompare(b.name))
+        );
+      } else {
+        await fetchUnits({ silent: true });
+      }
     } catch {
       setUnitAddError("Gagal menambahkan satuan kerja");
     } finally {
       setUnitAddLoading(false);
+    }
+  }
+
+  async function handleSaveGroqApiKey(unit: SatuanKerjaOption) {
+    setGroqKeySaveError(null);
+    setSavingGroqKeyUnitId(unit.id);
+    try {
+      const rawKey = groqKeyInputs[unit.id] ?? "";
+      const res = await fetch(
+        `/api/admin/satuan-kerja/${encodeURIComponent(unit.id)}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ groqApiKey: rawKey.trim() || null }),
+        }
+      );
+      const data = await res.json();
+      if (!res.ok) {
+        setGroqKeySaveError(data.error || "Gagal menyimpan kunci API");
+        return;
+      }
+      setUnits((prev) =>
+        prev.map((u) =>
+          u.id === unit.id
+            ? { ...u, groqApiKeyMasked: data.unit.groqApiKeyMasked }
+            : u
+        )
+      );
+      setGroqKeyInputs((prev) => {
+        const next = { ...prev };
+        delete next[unit.id];
+        return next;
+      });
+    } catch {
+      setGroqKeySaveError("Gagal menyimpan kunci API");
+    } finally {
+      setSavingGroqKeyUnitId(null);
     }
   }
 
@@ -294,22 +350,40 @@ export default function AdminWhitelistPage() {
           </button>
           {satuanKerjaExpanded && (
             <div className="mt-3">
-              <form onSubmit={handleAddUnit} className="flex flex-col sm:flex-row gap-3 mb-4">
-                <input
-                  type="text"
-                  value={unitNameInput}
-                  onChange={(e) => {
-                    setUnitNameInput(e.target.value);
-                    if (unitAddError) setUnitAddError(null);
-                  }}
-                  placeholder="Nama satuan kerja"
-                  disabled={unitAddLoading}
-                  className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-gray-900 placeholder-gray-400 focus:border-kemenkum-blue focus:outline-none focus:ring-1 focus:ring-kemenkum-blue disabled:opacity-60"
-                />
+              <form onSubmit={handleAddUnit} className="flex flex-col gap-3 mb-4">
+                <div className="flex flex-col sm:flex-row gap-3">
+                  <input
+                    type="text"
+                    value={unitNameInput}
+                    onChange={(e) => {
+                      setUnitNameInput(e.target.value);
+                      if (unitAddError) setUnitAddError(null);
+                    }}
+                    placeholder="Nama satuan kerja"
+                    disabled={unitAddLoading}
+                    className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-gray-900 placeholder-gray-400 focus:border-kemenkum-blue focus:outline-none focus:ring-1 focus:ring-kemenkum-blue disabled:opacity-60"
+                  />
+                  <input
+                    type="password"
+                    value={unitGroqKeyInput}
+                    onChange={(e) => {
+                      setUnitGroqKeyInput(e.target.value);
+                      if (unitAddError) setUnitAddError(null);
+                    }}
+                    placeholder="Groq API key (gsk_...)"
+                    disabled={unitAddLoading}
+                    autoComplete="off"
+                    className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-gray-900 placeholder-gray-400 focus:border-kemenkum-blue focus:outline-none focus:ring-1 focus:ring-kemenkum-blue disabled:opacity-60 font-mono"
+                  />
+                </div>
                 <button
                   type="submit"
-                  disabled={unitAddLoading}
-                  className="px-6 py-2 rounded-lg bg-kemenkum-blue text-white font-medium hover:opacity-90 disabled:opacity-60 whitespace-nowrap"
+                  disabled={
+                    unitAddLoading ||
+                    !unitNameInput.trim() ||
+                    !unitGroqKeyInput.trim()
+                  }
+                  className="self-start px-6 py-2 rounded-lg bg-kemenkum-blue text-white font-medium hover:opacity-90 disabled:opacity-60 whitespace-nowrap"
                 >
                   {unitAddLoading ? "Menambahkan…" : "Tambah Satuan Kerja"}
                 </button>
@@ -336,27 +410,118 @@ export default function AdminWhitelistPage() {
                   Belum ada satuan kerja. Tambahkan satuan kerja sebelum menetapkan NIP.
                 </p>
               ) : (
-                <div className="flex flex-wrap gap-2">
-                  {units.map((unit) => (
-                    <span
+                <div className="space-y-3">
+                  {groqKeySaveError && (
+                    <p className="text-sm text-red-600" role="alert">
+                      {groqKeySaveError}
+                    </p>
+                  )}
+                  {units.map((unit, index) => (
+                    <div
                       key={unit.id}
-                      className="inline-flex items-center gap-1.5 rounded-full bg-kemenkum-blue/10 px-3 py-1 text-sm font-medium text-kemenkum-blue ring-1 ring-kemenkum-blue/20"
+                      className={
+                        index < units.length - 1
+                          ? "border-b border-gray-100 pb-3"
+                          : undefined
+                      }
                     >
-                      {unit.name}
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteUnit(unit)}
-                        disabled={deletingUnitId !== null}
-                        aria-label={`Hapus ${unit.name}`}
-                        className="rounded-full p-0.5 text-kemenkum-blue hover:bg-kemenkum-blue/15 disabled:opacity-60"
-                      >
-                        {deletingUnitId === unit.id ? (
-                          <span className="text-xs px-0.5">…</span>
+                      <div className="flex items-center gap-3 py-2 text-left">
+                        <span className="text-sm font-medium text-gray-800 shrink-0">
+                          {unit.name}
+                        </span>
+                        {unit.groqApiKeyMasked ? (
+                          <span className="flex-1 min-w-0 font-mono text-xs text-gray-500 truncate">
+                            {unit.groqApiKeyMasked}
+                          </span>
                         ) : (
-                          <X size={14} strokeWidth={2.5} />
+                          <span className="flex-1 min-w-0 text-xs text-gray-400 italic">
+                            Belum ada kunci
+                          </span>
                         )}
-                      </button>
-                    </span>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => setEditingUnitId(unit.id)}
+                            disabled={savingGroqKeyUnitId !== null}
+                            aria-label={`Edit kunci ${unit.name}`}
+                            className="rounded-full p-0.5 text-kemenkum-blue hover:bg-kemenkum-blue/15 disabled:opacity-60"
+                          >
+                            <Pencil size={14} strokeWidth={2.5} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteUnit(unit)}
+                            disabled={deletingUnitId !== null}
+                            aria-label={`Hapus ${unit.name}`}
+                            className="rounded-full p-0.5 text-kemenkum-blue hover:bg-kemenkum-blue/15 disabled:opacity-60"
+                          >
+                            {deletingUnitId === unit.id ? (
+                              <span className="text-xs px-0.5">…</span>
+                            ) : (
+                              <X size={14} strokeWidth={2.5} />
+                            )}
+                          </button>
+                        </div>
+                      </div>
+                      {editingUnitId === unit.id && (
+                        <div className="flex flex-col sm:flex-row gap-2 pb-2 text-left">
+                          <input
+                            type="password"
+                            value={groqKeyInputs[unit.id] ?? ""}
+                            onChange={(e) => {
+                              setGroqKeyInputs((prev) => ({
+                                ...prev,
+                                [unit.id]: e.target.value,
+                              }));
+                              if (groqKeySaveError) setGroqKeySaveError(null);
+                            }}
+                            placeholder="gsk_..."
+                            disabled={savingGroqKeyUnitId !== null}
+                            autoComplete="off"
+                            className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-kemenkum-blue focus:outline-none focus:ring-1 focus:ring-kemenkum-blue disabled:opacity-60 font-mono"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              void (async () => {
+                                await handleSaveGroqApiKey(unit);
+                                setTimeout(() => {
+                                  setGroqKeyInputs((inputs) => {
+                                    if (!(unit.id in inputs)) {
+                                      setEditingUnitId((id) =>
+                                        id === unit.id ? null : id
+                                      );
+                                    }
+                                    return inputs;
+                                  });
+                                }, 0);
+                              })();
+                            }}
+                            disabled={savingGroqKeyUnitId !== null}
+                            className="px-4 py-2 rounded-lg bg-kemenkum-blue text-white text-sm font-medium hover:opacity-90 disabled:opacity-60 whitespace-nowrap"
+                          >
+                            {savingGroqKeyUnitId === unit.id
+                              ? "Menyimpan…"
+                              : "Simpan"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingUnitId(null);
+                              setGroqKeyInputs((prev) => {
+                                const next = { ...prev };
+                                delete next[unit.id];
+                                return next;
+                              });
+                            }}
+                            disabled={savingGroqKeyUnitId !== null}
+                            className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 text-sm font-medium hover:bg-gray-50 disabled:opacity-60 whitespace-nowrap"
+                          >
+                            Batal
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   ))}
                 </div>
               )}

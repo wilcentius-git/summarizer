@@ -32,6 +32,7 @@ import {
   transcribeWithGroq,
 } from "@/lib/transcribe-audio";
 import { deleteAudio, saveAudio } from "@/lib/audio-storage";
+import { decryptApiKey } from "@/lib/crypto";
 import { resolveGroqApiKey } from "@/lib/resolve-groq-api-key";
 import { checkRateLimit } from "@/lib/rate-limit";
 
@@ -49,12 +50,14 @@ function toFileType(fileName: string, isAudio: boolean): "mp3" | "pdf" | "docx" 
 
 export async function POST(request: NextRequest) {
   let payload: { userId: string; email: string } | null = null;
+  let isApiKeyAuth = false;
 
   const authHeader = request.headers.get("authorization");
   if (authHeader?.startsWith("Bearer ")) {
     const apiKeyRecord = await validateApiKey(authHeader.slice(7));
     if (apiKeyRecord) {
       payload = { userId: "admin", email: `api-key:${apiKeyRecord.name}` };
+      isApiKeyAuth = true;
     }
   }
 
@@ -66,6 +69,18 @@ export async function POST(request: NextRequest) {
 
   if (!payload) {
     return NextResponse.json({ error: "Unauthorized. Please log in." }, { status: 401 });
+  }
+
+  let satuanKerjaGroqKey: string | null = null;
+  if (!isApiKeyAuth) {
+    const whitelistEntry = await prisma.whitelist.findUnique({
+      where: { nip: payload.userId },
+      include: { satuanKerja: { select: { groqApiKey: true } } },
+    });
+    const encryptedKey = whitelistEntry?.satuanKerja?.groqApiKey;
+    if (encryptedKey) {
+      satuanKerjaGroqKey = decryptApiKey(encryptedKey);
+    }
   }
 
   const rateLimitResult = await checkRateLimit(`summarize:${payload.userId}`);
@@ -82,7 +97,10 @@ export async function POST(request: NextRequest) {
   } catch {
     return NextResponse.json({ error: "Invalid form data." }, { status: 400 });
   }
-  const apiKey = resolveGroqApiKey(formData.get("groqApiKey") as string | null | undefined);
+  const apiKey = resolveGroqApiKey(
+    formData.get("groqApiKey") as string | null | undefined,
+    satuanKerjaGroqKey
+  );
   const glossary = ((formData.get("glossary") as string | null) ?? "").trim();
   const pipeline = SUMMARIZE_PIPELINE_STANDARD;
   const file = formData.get("file");

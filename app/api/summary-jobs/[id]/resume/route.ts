@@ -22,6 +22,7 @@ import {
 } from "@/lib/transcribe-audio";
 import { audioExists, deleteAudio } from "@/lib/audio-storage";
 import { truncateSummarySections } from "@/lib/summary-format";
+import { decryptApiKey } from "@/lib/crypto";
 import { resolveGroqApiKey } from "@/lib/resolve-groq-api-key";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { jobVisibilityWhere } from "@/lib/job-visibility";
@@ -123,8 +124,21 @@ export async function POST(
       return NextResponse.json({ error: "Invalid job retry context." }, { status: 400 });
     }
 
+    let satuanKerjaGroqKey: string | null = null;
+    const whitelistEntry = await prisma.whitelist.findUnique({
+      where: { nip: payload.userId },
+      include: { satuanKerja: { select: { groqApiKey: true } } },
+    });
+    const encryptedKey = whitelistEntry?.satuanKerja?.groqApiKey;
+    if (encryptedKey) {
+      satuanKerjaGroqKey = decryptApiKey(encryptedKey);
+    }
+
     const body = await request.json().catch(() => ({}));
-    const apiKey = resolveGroqApiKey(body.groqApiKey as string | null | undefined);
+    const apiKey = resolveGroqApiKey(
+      body.groqApiKey as string | null | undefined,
+      satuanKerjaGroqKey
+    );
     if (!apiKey) {
       return NextResponse.json(
         {

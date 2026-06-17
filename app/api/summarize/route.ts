@@ -36,6 +36,7 @@ import { decryptApiKey } from "@/lib/crypto";
 import { resolveGroqApiKey } from "@/lib/resolve-groq-api-key";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { writeAuditLog } from "@/lib/audit-log";
+import { logger } from "@/lib/logger";
 
 function sendStreamLine(controller: ReadableStreamDefaultController<Uint8Array>, obj: object) {
   const encoder = new TextEncoder();
@@ -228,7 +229,7 @@ export async function POST(request: NextRequest) {
             data: updates,
           });
           if (result.count === 0) {
-            console.warn(
+            logger.warn(
               "SummaryJob update skipped: no row for id (job may have been deleted).",
               job.id
             );
@@ -303,7 +304,7 @@ export async function POST(request: NextRequest) {
               },
             });
             transcribeEndMs = Date.now();
-            console.log(
+            logger.log(
               `>>> [TIMING] Transcription done in ${transcribeEndMs - transcribeStartMs!}ms`
             );
           } catch (transcribeErr) {
@@ -351,7 +352,7 @@ export async function POST(request: NextRequest) {
         let summary: string;
 
         try {
-          console.log(`>>> [SUMMARIZE] Starting. Text length: ${text.length} chars`);
+          logger.log(`>>> [SUMMARIZE] Starting. Text length: ${text.length} chars`);
           if (!isAudio && text.length <= pipeline.summarizeChunkSize) {
             await updateJob({ progressPercentage: 60 });
             send({
@@ -389,7 +390,7 @@ export async function POST(request: NextRequest) {
                 return;
               }
               const chunk = chunks[i];
-              console.log(`[CHUNK ${i + 1}/${total}] Starting. Text length: ${chunk.length} chars`);
+              logger.log(`[CHUNK ${i + 1}/${total}] Starting. Text length: ${chunk.length} chars`);
 
               const { content: part, headers: responseHeaders } = await summarizeWithGroq(
                 chunk,
@@ -401,7 +402,7 @@ export async function POST(request: NextRequest) {
                   returnHeaders: true,
                 }
               );
-              console.log(
+              logger.log(
                 `>>> [CHUNK ${i + 1}/${total}] Summary length: ${part.length} chars (~${Math.round(part.length / 4)} tokens)`
               );
               chunkSummaries.push(part);
@@ -424,7 +425,7 @@ export async function POST(request: NextRequest) {
             }
 
             summarizeEndMs = Date.now();
-            console.log(
+            logger.log(
               `>>> [TIMING] Summarization done in ${summarizeEndMs - summarizeStartMs!}ms`
             );
 
@@ -441,7 +442,7 @@ export async function POST(request: NextRequest) {
               step: isAudio ? 2 : 1,
               stepLabel: "Gabung",
             });
-            console.log(
+            logger.log(
               `>>> [MERGE] Phase starting. Total chunks: ${chunkSummaries.length}`
             );
             mergeStartMs = Date.now();
@@ -469,13 +470,13 @@ export async function POST(request: NextRequest) {
                     batchResults,
                   }),
                 });
-                console.log(
+                logger.log(
                   `>>> [MERGE CHECKPOINT] Saved ${batchResults.length} batch results to DB`
                 );
               },
             });
             mergeEndMs = Date.now();
-            console.log(`>>> [TIMING] Merge done in ${mergeEndMs - mergeStartMs!}ms`);
+            logger.log(`>>> [TIMING] Merge done in ${mergeEndMs - mergeStartMs!}ms`);
           }
 
           if (!summary) summary = "Rangkuman tidak dapat dibuat.";
@@ -507,7 +508,7 @@ export async function POST(request: NextRequest) {
           if (audioPathToCleanup) deleteAudio(audioPathToCleanup);
           send({ type: "summary", text: summary });
         } catch (groqErr) {
-          console.log(`>>> [SUMMARIZE] Error:`, groqErr);
+          logger.log(`>>> [SUMMARIZE] Error:`, groqErr);
           if (isGroqRateLimitError(groqErr)) {
             const retryAfter = new Date(Date.now() + RETRY_AFTER_HOURS * 60 * 60 * 1000);
             await updateJob({

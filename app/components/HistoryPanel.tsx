@@ -2,13 +2,120 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { EditorContent, useEditor } from "@tiptap/react";
+import StarterKit from "@tiptap/starter-kit";
+import { BulletList, OrderedList, ListItem, ListKeymap } from "@tiptap/extension-list";
 import { RawResult } from "@/app/components/RawResult";
 import { SummaryMarkdownBody } from "@/app/components/SummaryMarkdownBody";
 import { useAuth } from "@/app/contexts/AuthContext";
 import { buildJobPdf } from "@/lib/export-pdf";
+import { htmlToMarkdown, markdownToHtml } from "@/lib/markdown-editor";
 import { sanitizeTitleForFilename, signAndExportPdf } from "@/lib/sign-and-export-pdf";
 import { PassphraseModal } from "@/components/PassphraseModal";
 import type { SummaryJobItem } from "@/app/hooks/useHistory";
+
+type SummaryEditorPanelProps = {
+  summaryText: string;
+  isSaving: boolean;
+  onCancel: () => void;
+  onSave: (markdown: string) => void;
+};
+
+function SummaryEditorPanel({
+  summaryText,
+  isSaving,
+  onCancel,
+  onSave,
+}: SummaryEditorPanelProps) {
+  const editor = useEditor({
+    extensions: [
+      StarterKit.configure({
+        heading: { levels: [1, 2, 3] },
+        bulletList: false,
+        orderedList: false,
+        listItem: false,
+        listKeymap: false,
+      }),
+      BulletList,
+      OrderedList,
+      ListItem,
+    ],
+    content: markdownToHtml(summaryText),
+    immediatelyRender: false,
+  });
+
+  const toolbarButtonClass = (active: boolean) =>
+    `rounded-md px-3 py-1.5 text-sm font-medium transition-colors disabled:opacity-60 ${
+      active
+        ? "bg-gray-200 text-gray-900"
+        : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+    }`;
+
+  if (!editor) {
+    return <p className="text-sm text-gray-600">Memuat editor…</p>;
+  }
+
+  return (
+    <>
+      <div className="mb-3 flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={() => editor.chain().focus().toggleBold().run()}
+          disabled={isSaving}
+          className={toolbarButtonClass(editor.isActive("bold"))}
+        >
+          Bold
+        </button>
+        <button
+          type="button"
+          onClick={() => editor.chain().focus().toggleItalic().run()}
+          disabled={isSaving}
+          className={toolbarButtonClass(editor.isActive("italic"))}
+        >
+          Italic
+        </button>
+        <button
+          type="button"
+          onClick={() => editor.chain().focus().toggleBulletList().run()}
+          disabled={isSaving}
+          className={toolbarButtonClass(editor.isActive("bulletList"))}
+        >
+          Bullet List
+        </button>
+        <button
+          type="button"
+          onClick={() => editor.chain().focus().toggleOrderedList().run()}
+          disabled={isSaving}
+          className={toolbarButtonClass(editor.isActive("orderedList"))}
+        >
+          Ordered List
+        </button>
+      </div>
+      <EditorContent
+        editor={editor}
+        className="min-h-[200px] rounded-lg border border-gray-200 bg-gray-50 p-4 text-left text-sm text-gray-900 [&_.ProseMirror]:min-h-[180px] [&_.ProseMirror]:outline-none [&_.ProseMirror_ol]:list-decimal [&_.ProseMirror_ol]:pl-6 [&_.ProseMirror_ol]:my-2 [&_.ProseMirror_ul]:list-disc [&_.ProseMirror_ul]:pl-6 [&_.ProseMirror_ul]:my-2 [&_.ProseMirror_li]:my-1 [&_.ProseMirror_h3]:font-bold [&_.ProseMirror_h3]:text-base [&_.ProseMirror_h3]:mt-4 [&_.ProseMirror_h3]:mb-2"
+      />
+      <div className="mt-3 flex gap-2">
+        <button
+          type="button"
+          onClick={onCancel}
+          disabled={isSaving}
+          className="px-3 py-1.5 rounded-lg bg-gray-100 text-gray-600 text-sm font-medium hover:bg-gray-200 disabled:opacity-60"
+        >
+          Batal
+        </button>
+        <button
+          type="button"
+          onClick={() => onSave(htmlToMarkdown(editor.getHTML()))}
+          disabled={isSaving}
+          className="px-3 py-1.5 rounded-lg bg-kemenkum-blue text-white text-sm font-medium hover:opacity-90 disabled:opacity-60"
+        >
+          {isSaving ? "Menyimpan…" : "Simpan"}
+        </button>
+      </div>
+    </>
+  );
+}
 
 type HistoryPanelProps = {
   historyJobs: SummaryJobItem[];
@@ -19,6 +126,7 @@ type HistoryPanelProps = {
   onAbortResume: () => void;
   onDeleteJob: (jobId: string) => Promise<void>;
   setError: (err: string | null) => void;
+  fetchHistory?: () => Promise<void>;
   /** Increment after a job completes to expand riwayat and scroll it into view. */
   focusHistorySignal?: number;
 };
@@ -96,6 +204,7 @@ export function HistoryPanel({
   onAbortResume,
   onDeleteJob,
   setError,
+  fetchHistory,
   focusHistorySignal = 0,
 }: HistoryPanelProps) {
   const { user } = useAuth();
@@ -107,6 +216,8 @@ export function HistoryPanel({
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [passphraseModalKey, setPassphraseModalKey] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const sectionRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
@@ -118,13 +229,53 @@ export function HistoryPanel({
   }, [focusHistorySignal]);
 
   useEffect(() => {
-    if (!modal) return;
+    if (!modal) {
+      setIsEditing(false);
+      return;
+    }
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") setModal(null);
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [modal]);
+
+  const handleSaveSummary = useCallback(
+    async (markdown: string) => {
+      if (!modal || modal.type !== "rangkuman") return;
+
+      setIsSaving(true);
+      try {
+        const res = await fetch(
+          `/api/summary-jobs/${encodeURIComponent(modal.job.id)}/edit`,
+          {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            credentials: "include",
+            body: JSON.stringify({ summaryText: markdown }),
+          }
+        );
+        const data = (await res.json()) as { error?: string };
+        if (!res.ok) {
+          window.alert(data.error || "Gagal menyimpan rangkuman.");
+          return;
+        }
+
+        setModal((prev) =>
+          prev
+            ? { ...prev, job: { ...prev.job, summaryText: markdown } }
+            : null
+        );
+        await fetchHistory?.();
+        setIsEditing(false);
+      } catch {
+        window.alert("Gagal menyimpan rangkuman.");
+      } finally {
+        setIsSaving(false);
+      }
+    },
+    [modal, fetchHistory]
+  );
 
   const buildExportDoc = useCallback(async () => {
     if (!modal) return null;
@@ -333,6 +484,16 @@ export function HistoryPanel({
                       Salin
                     </button>
                   )}
+                  {modal.type === "rangkuman" && !isEditing && (
+                    <button
+                      type="button"
+                      onClick={() => setIsEditing(true)}
+                      className="px-3 py-1.5 rounded-lg bg-gray-100 text-gray-700 text-sm font-medium hover:bg-gray-200"
+                    >
+                      Edit
+                    </button>
+                  )}
+                  {!isEditing && (
                   <button
                     type="button"
                     onClick={async () => {
@@ -362,6 +523,7 @@ export function HistoryPanel({
                   >
                     Export PDF
                   </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => setModal(null)}
@@ -373,15 +535,25 @@ export function HistoryPanel({
               </div>
               {/* Content */}
               <div
-                className="overflow-y-auto p-5 flex-1 select-none"
-                onCopy={(e) => e.preventDefault()}
-                onCut={(e) => e.preventDefault()}
-                onContextMenu={(e) => e.preventDefault()}
+                className={`overflow-y-auto p-5 flex-1 ${isEditing ? "" : "select-none"}`}
+                onCopy={isEditing ? undefined : (e) => e.preventDefault()}
+                onCut={isEditing ? undefined : (e) => e.preventDefault()}
+                onContextMenu={isEditing ? undefined : (e) => e.preventDefault()}
               >
                 {modal.type === "transkrip" ? (
                   <RawResult
                     label=""
                     text={modal.job.sourceText!}
+                  />
+                ) : isEditing ? (
+                  <SummaryEditorPanel
+                    key={modal.job.id}
+                    summaryText={modal.job.summaryText!}
+                    isSaving={isSaving}
+                    onCancel={() => setIsEditing(false)}
+                    onSave={(markdown) => {
+                      void handleSaveSummary(markdown);
+                    }}
                   />
                 ) : (
                   <div className="text-left [&_*]:text-left">

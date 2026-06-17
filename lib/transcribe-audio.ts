@@ -6,6 +6,7 @@
 
 import { chunkAudioBuffer } from "@/lib/audio-chunking";
 import { sleep } from "@/lib/groq";
+import { logger } from "@/lib/logger";
 
 export const GROQ_TRANSCRIPTION_URL =
   "https://api.groq.com/openai/v1/audio/transcriptions";
@@ -239,7 +240,7 @@ export async function transcribeWithGroq(
     chunks = result.chunks;
     cleanup = result.cleanup;
   } catch (chunkErr) {
-    console.warn("Audio chunking failed, sending whole file:", chunkErr);
+    logger.warn("Audio chunking failed, sending whole file:", chunkErr);
     chunks = [{ buffer }];
   }
 

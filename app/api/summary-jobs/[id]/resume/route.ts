@@ -27,6 +27,7 @@ import { resolveGroqApiKey } from "@/lib/resolve-groq-api-key";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { jobVisibilityWhere } from "@/lib/job-visibility";
 import { writeAuditLog } from "@/lib/audit-log";
+import { logger } from "@/lib/logger";
 
 /** Job with fields needed for resume (Prisma client may be out of sync with schema). */
 type ResumableJob = {
@@ -236,7 +237,7 @@ export async function POST(
               data: updates as Record<string, unknown>,
             });
             if (result.count === 0) {
-              console.warn(
+              logger.warn(
                 "SummaryJob resume update skipped: no row for id (job may have been deleted).",
                 jobId
               );

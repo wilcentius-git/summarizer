@@ -207,6 +207,7 @@ PERAN TIAP BAGIAN (WAJIB DIPATUHI):
 - **Insight tambahan** = takeaway non-obvious DARI narasumber/penulis. Bukan nasihat hidup umum.
 
 - Output HANYA 3 bagian. Beri baris kosong antara judul dan isi.
+- PENTING FORMAT HEADING: Setiap heading section (**Ringkasan Eksekutif:**, **Rangkuman:**, **Insight tambahan:**) harus berada di baris TERPISAH, diikuti baris kosong, lalu isinya. JANGAN gabungkan heading dan isi dalam satu baris.
 - JANGAN gunakan format notula (Metadata, Peserta Rapat, Acara, dll.) untuk dokumen ini.
 - Variasikan frasa: jangan ulangi "penulis berpendapat" berkali-kali; gunakan "menurut penulis", "penulis menyatakan", "penulis mengemukakan", dll.
 - KONSOLIDASI: Gabungkan poin yang mirip menjadi satu. Jangan ulangi ide yang sama.
@@ -263,7 +264,8 @@ ATURAN:
 - Hindari kata "juga" di awal atau akhir kalimat. Variasikan kata penghubung dan frasa (selain itu, selanjutnya, menurut penulis, dll.) - jangan gunakan "penulis berpendapat" berulang kali.
 - KOREKSI TRANSKRIPSI: Perbaiki kesalahan umum dari speech-to-text, mis. "ekspetasi" → "ekspektasi", "menafigasi" → "menavigasi", "infestasi" → "investasi".
 - Pastikan rangkuman selesai LENGKAP; jangan potong di tengah kalimat atau paragraf.
-- Tanpa pembukaan lain, langsung rangkuman saja. Output akhir: tepat satu blok **Ringkasan Eksekutif**, satu blok **Rangkuman**, satu blok **Insight tambahan**. Tidak boleh ada pengulangan struktur ini.`;
+- Tanpa pembukaan lain, langsung rangkuman saja. Output akhir: tepat satu blok **Ringkasan Eksekutif**, satu blok **Rangkuman**, satu blok **Insight tambahan**. Tidak boleh ada pengulangan struktur ini.
+- PENTING FORMAT HEADING: Setiap heading section harus berada di baris TERPISAH, diikuti baris kosong, lalu isinya. JANGAN gabungkan heading dan isi dalam satu baris.`;
 
 const MERGE_INTERMEDIATE_PROMPT = `Anda adalah asisten notulen. Tugas Anda adalah mengompres poin-poin berikut menjadi daftar ringkas.
 

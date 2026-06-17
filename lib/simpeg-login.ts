@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { logger } from "@/lib/logger";
+
 const SIMPEG_LOGIN_URL =
   "https://e-arsip.kemenkum.go.id/index.php/api/login_simpeg";
 
@@ -25,8 +27,8 @@ export async function loginViaSimpeg(
   nip: string,
   pass: string
 ): Promise<SimpegLoginResult> {
-  console.log("[Pusdatin] bearer set:", !!process.env.PUSDATIN_BEARER_TOKEN);
-  console.log("[Pusdatin] TLS:", process.env.NODE_TLS_REJECT_UNAUTHORIZED);
+  logger.log("[Pusdatin] bearer set:", !!process.env.PUSDATIN_BEARER_TOKEN);
+  logger.log("[Pusdatin] TLS:", process.env.NODE_TLS_REJECT_UNAUTHORIZED);
   const bearer = process.env.PUSDATIN_BEARER_TOKEN;
   if (!bearer) {
     return { ok: false, reason: "config", message: "PUSDATIN_BEARER_TOKEN is not set" };
@@ -37,7 +39,7 @@ export async function loginViaSimpeg(
   const tid = setTimeout(() => controller.abort(), timeoutMs);
 
   const requestBody = JSON.stringify({ user: nip, pass });
-  console.log("[Pusdatin] before fetch", { nip });
+  logger.log("[Pusdatin] before fetch", { nip });
 
   let res: Response;
   try {
@@ -65,7 +67,7 @@ export async function loginViaSimpeg(
     return { ok: false, reason: "bad_response" };
   }
 
-  console.log("[Pusdatin] after fetch", { status: res.status });
+  logger.log("[Pusdatin] after fetch", { status: res.status });
 
   let json: unknown;
   try {

@@ -4,6 +4,7 @@ import https, { request as httpsRequest } from "node:https";
 import { URL } from "node:url";
 
 import { verifyToken } from "@/lib/auth";
+import { logger } from "@/lib/logger";
 
 const TTE_SIGN_URL = "https://e-arsip.kemenkum.go.id/index.php/api/tte_sign";
 
@@ -164,7 +165,7 @@ export async function POST(request: NextRequest) {
         "Content-Type": `multipart/form-data; boundary=${boundary}`,
       })
     ).text;
-    console.log("[sign-pdf] upstream response:", text);
+    logger.log("[sign-pdf] upstream response:", text);
   } catch (e) {
     console.error("sign-pdf upstream:", e);
     return NextResponse.json({ error: GENERIC_ERROR }, { status: 400 });

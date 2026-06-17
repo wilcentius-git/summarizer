@@ -62,6 +62,7 @@
         .audioBitrate("64k")
         .audioChannels(1)
         .audioFrequency(16000)
+        .outputOptions('-loglevel error')
         .on("error", reject)
         .pipe();
 

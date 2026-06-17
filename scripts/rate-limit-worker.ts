@@ -15,6 +15,7 @@ import { prisma } from "../lib/prisma";
 import { decryptApiKey } from "../lib/crypto";
 import { processRateLimitedJob } from "../lib/retry-summarize";
 import { resolveGroqApiKey } from "../lib/resolve-groq-api-key";
+import { logger } from "../lib/logger";
 
 const CHECK_INTERVAL_MS = 60 * 1000; // 60 seconds
 const RETRY_AFTER_HOURS = 1;
@@ -54,7 +55,7 @@ async function runWorkerLoop() {
         try {
           const apiKey = await resolveGroqApiKeyForJob(job.userId);
           if (!apiKey) {
-            console.warn(
+            logger.warn(
               `[worker] No Groq API key for job ${job.id} (user ${job.userId}). Skipping.`
             );
             continue;
@@ -81,7 +82,7 @@ async function runWorkerLoop() {
                 jobRetryContext: null,
               },
             });
-            console.log(`[worker] Job ${job.id} (${job.filename}) completed.`);
+            logger.log(`[worker] Job ${job.id} (${job.filename}) completed.`);
           } else {
             if (result.error.includes("Rate limit")) {
               const retryAfter = new Date(Date.now() + RETRY_AFTER_HOURS * 60 * 60 * 1000);
@@ -92,7 +93,7 @@ async function runWorkerLoop() {
                   retryAfter,
                 },
               });
-              console.log(`[worker] Job ${job.id} hit rate limit again. Retry at ${retryAfter.toISOString()}.`);
+              logger.log(`[worker] Job ${job.id} hit rate limit again. Retry at ${retryAfter.toISOString()}.`);
             } else {
               await prisma.summaryJob.update({
                 where: { id: job.id },

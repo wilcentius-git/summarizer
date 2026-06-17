@@ -26,6 +26,7 @@ import { decryptApiKey } from "@/lib/crypto";
 import { resolveGroqApiKey } from "@/lib/resolve-groq-api-key";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { jobVisibilityWhere } from "@/lib/job-visibility";
+import { writeAuditLog } from "@/lib/audit-log";
 
 /** Job with fields needed for resume (Prisma client may be out of sync with schema). */
 type ResumableJob = {
@@ -189,6 +190,13 @@ export async function POST(
         { status: 400 }
       );
     }
+
+    await writeAuditLog({
+      type: "JOB",
+      action: "job.resumed",
+      userId: payload.userId,
+      metadata: { jobId },
+    });
 
     const stream = new ReadableStream({
       async start(controller) {

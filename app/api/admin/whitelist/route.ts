@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/require-admin";
 import { whitelistNipSchema } from "@/lib/validations";
+import { writeAuditLog } from "@/lib/audit-log";
 
 export async function GET() {
   try {
@@ -60,6 +61,12 @@ export async function POST(request: Request) {
     const entry = await prisma.whitelist.create({
       data: { nip, satuanKerjaId },
       include: { satuanKerja: true },
+    });
+    await writeAuditLog({
+      type: "ADMIN",
+      action: "admin.whitelist.add",
+      userId: auth.userId,
+      metadata: { nip },
     });
     return NextResponse.json(entry, { status: 201 });
   } catch (err) {

@@ -78,7 +78,7 @@ export default function Home() {
               {user.isAdmin && (
                 <button
                   type="button"
-                  onClick={() => router.push("/admin/whitelist")}
+                  onClick={() => router.push("/admin/settings")}
                   aria-label="Admin settings"
                   className="p-2 rounded-lg text-kemenkum-blue hover:opacity-80 shrink-0"
                 >

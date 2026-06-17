@@ -79,3 +79,16 @@ model Whitelist {
 
   @@map("whitelist")
 }
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  type      String   // JOB | AUTH | ADMIN | ERROR
+  action    String   // e.g. "job.completed", "auth.login", "admin.whitelist.add"
+  userId    String?
+  metadata  Json?
+  createdAt DateTime @default(now())
+
+  @@index([type])
+  @@index([createdAt])
+  @@index([userId])
+}

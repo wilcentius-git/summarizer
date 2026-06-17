@@ -35,6 +35,7 @@ import { deleteAudio, saveAudio } from "@/lib/audio-storage";
 import { decryptApiKey } from "@/lib/crypto";
 import { resolveGroqApiKey } from "@/lib/resolve-groq-api-key";
 import { checkRateLimit } from "@/lib/rate-limit";
+import { writeAuditLog } from "@/lib/audit-log";
 
 function sendStreamLine(controller: ReadableStreamDefaultController<Uint8Array>, obj: object) {
   const encoder = new TextEncoder();
@@ -159,6 +160,23 @@ export async function POST(request: NextRequest) {
       status: "pending",
       progressPercentage: 0,
       groqAttempts: 0,
+    },
+  });
+
+  await writeAuditLog({
+    type: "JOB",
+    action: "job.created",
+    userId: payload.userId,
+    metadata: {
+      filename: fileName,
+      satuanKerjaId: isApiKeyAuth
+        ? null
+        : (
+            await prisma.whitelist.findUnique({
+              where: { nip: payload.userId },
+              select: { satuanKerjaId: true },
+            })
+          )?.satuanKerjaId ?? null,
     },
   });
 

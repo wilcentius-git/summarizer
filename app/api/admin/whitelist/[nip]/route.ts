@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/require-admin";
 import { whitelistSatuanKerjaSchema } from "@/lib/validations";
+import { writeAuditLog } from "@/lib/audit-log";
 
 export async function PUT(
   request: Request,
@@ -78,6 +79,12 @@ export async function DELETE(
     }
 
     await prisma.whitelist.delete({ where: { nip } });
+    await writeAuditLog({
+      type: "ADMIN",
+      action: "admin.whitelist.remove",
+      userId: auth.userId,
+      metadata: { nip },
+    });
     return NextResponse.json({ success: true });
   } catch (err) {
     console.error("Whitelist delete error:", err);

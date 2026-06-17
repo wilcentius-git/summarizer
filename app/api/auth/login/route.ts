@@ -6,9 +6,15 @@ import { loginSchema } from "@/lib/validations";
 import { prisma } from "@/lib/prisma";
 import { loginViaSimpeg } from "@/lib/simpeg-login";
 import { ensureUserForNip } from "@/lib/provision-user";
+import { writeAuditLog } from "@/lib/audit-log";
 import type { User } from "@prisma/client";
 
 async function sendLoginResponse(user: User, canonicalNip: string) {
+  await writeAuditLog({
+    type: "AUTH",
+    action: "auth.login",
+    userId: canonicalNip,
+  });
   const token = await createToken({
     userId: canonicalNip,
     email: canonicalNip,
@@ -45,6 +51,12 @@ export async function POST(request: Request) {
     // Seeded / local admin: check password only in DB, never call Simpeg.
     if (dbUser?.isAdmin) {
       if (!(await verifyPassword(pass, dbUser.passwordHash))) {
+        await writeAuditLog({
+          type: "AUTH",
+          action: "auth.login.failed",
+          userId: trimmedNip,
+          metadata: { reason: "invalid_password" },
+        });
         return NextResponse.json(
           { error: "Invalid NIP or password" },
           { status: 401 }
@@ -73,6 +85,12 @@ export async function POST(request: Request) {
       );
     }
     if (!simpeg.ok) {
+      await writeAuditLog({
+        type: "AUTH",
+        action: "auth.login.failed",
+        userId: trimmedNip,
+        metadata: { reason: "invalid_credentials" },
+      });
       return NextResponse.json(
         { error: "Invalid NIP or password" },
         { status: 401 }
@@ -84,6 +102,12 @@ export async function POST(request: Request) {
       where: { nip: canonicalNip },
     });
     if (!whitelisted) {
+      await writeAuditLog({
+        type: "AUTH",
+        action: "auth.login.failed",
+        userId: canonicalNip,
+        metadata: { reason: "not_whitelisted" },
+      });
       return NextResponse.json(
         {
           error:

@@ -2,9 +2,11 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { Bold, Italic, Underline as UnderlineIcon, List, ListOrdered, Undo2, Redo2 } from "lucide-react";
 import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import { BulletList, OrderedList, ListItem, ListKeymap } from "@tiptap/extension-list";
+import { TextStyle, FontSize } from "@tiptap/extension-text-style";
 import { RawResult } from "@/app/components/RawResult";
 import { SummaryMarkdownBody } from "@/app/components/SummaryMarkdownBody";
 import { useAuth } from "@/app/contexts/AuthContext";
@@ -39,16 +41,29 @@ function SummaryEditorPanel({
       BulletList,
       OrderedList,
       ListItem,
+      TextStyle,
+      FontSize,
     ],
     content: markdownToHtml(summaryText),
     immediatelyRender: false,
   });
 
+  const [, forceUpdate] = useState(0);
+
+  useEffect(() => {
+    if (!editor) return;
+    const update = () => forceUpdate((n) => n + 1);
+    editor.on("transaction", update);
+    return () => {
+      editor.off("transaction", update);
+    };
+  }, [editor]);
+
   const toolbarButtonClass = (active: boolean) =>
-    `rounded-md px-3 py-1.5 text-sm font-medium transition-colors disabled:opacity-60 ${
+    `rounded-md p-1.5 transition-colors disabled:opacity-60 ${
       active
         ? "bg-gray-200 text-gray-900"
-        : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+        : "text-gray-700 hover:bg-gray-200"
     }`;
 
   if (!editor) {
@@ -57,44 +72,54 @@ function SummaryEditorPanel({
 
   return (
     <>
-      <div className="mb-3 flex flex-wrap gap-2">
-        <button
-          type="button"
-          onClick={() => editor.chain().focus().toggleBold().run()}
-          disabled={isSaving}
-          className={toolbarButtonClass(editor.isActive("bold"))}
-        >
-          Bold
-        </button>
-        <button
-          type="button"
-          onClick={() => editor.chain().focus().toggleItalic().run()}
-          disabled={isSaving}
-          className={toolbarButtonClass(editor.isActive("italic"))}
-        >
-          Italic
-        </button>
-        <button
-          type="button"
-          onClick={() => editor.chain().focus().toggleBulletList().run()}
-          disabled={isSaving}
-          className={toolbarButtonClass(editor.isActive("bulletList"))}
-        >
-          Bullet List
-        </button>
-        <button
-          type="button"
-          onClick={() => editor.chain().focus().toggleOrderedList().run()}
-          disabled={isSaving}
-          className={toolbarButtonClass(editor.isActive("orderedList"))}
-        >
-          Ordered List
-        </button>
+      <div className="rounded-lg border border-gray-200 overflow-hidden">
+        <div className="sticky top-0 z-10 flex flex-wrap items-center gap-1 border-b border-gray-200 bg-white p-2 shadow-sm">
+          {/* Undo / Redo */}
+          <button type="button" onClick={() => editor.chain().focus().undo().run()} disabled={isSaving || !editor.can().undo()} className={toolbarButtonClass(!editor.can().undo())} title="Undo">
+            <Undo2 size={16} />
+          </button>
+          <button type="button" onClick={() => editor.chain().focus().redo().run()} disabled={isSaving || !editor.can().redo()} className={toolbarButtonClass(!editor.can().redo())} title="Redo">
+            <Redo2 size={16} />
+          </button>
+
+          <div className="mx-1 h-5 w-px bg-gray-300" />
+
+          {/* Bold / Italic / Underline */}
+          <button type="button" onClick={() => editor.chain().focus().toggleBold().run()} disabled={isSaving} className={toolbarButtonClass(editor.isActive("bold") || editor.isActive("heading"))} title="Bold">
+            <Bold size={16} />
+          </button>
+          <button type="button" onClick={() => editor.chain().focus().toggleItalic().run()} disabled={isSaving} className={toolbarButtonClass(editor.isActive("italic"))} title="Italic">
+            <Italic size={16} />
+          </button>
+
+          <div className="mx-1 h-5 w-px bg-gray-300" />
+
+          {/* Lists */}
+          <button type="button" onClick={() => editor.chain().focus().toggleBulletList().run()} disabled={isSaving} className={toolbarButtonClass(editor.isActive("bulletList"))} title="Bullet List">
+            <List size={16} />
+          </button>
+          <button type="button" onClick={() => editor.chain().focus().toggleOrderedList().run()} disabled={isSaving} className={toolbarButtonClass(editor.isActive("orderedList"))} title="Ordered List">
+            <ListOrdered size={16} />
+          </button>
+
+          <div className="mx-1 h-5 w-px bg-gray-300" />
+
+          {/* Font Size — only two sizes: normal (14px) and large (18px) */}
+          <button type="button" onClick={() => editor.chain().focus().setFontSize("16px").run()} disabled={isSaving} className={toolbarButtonClass(editor.isActive("textStyle", { fontSize: "16px" }) || editor.isActive("heading"))} title="Large text">
+            <span className="text-base font-bold">A</span>
+          </button>
+          <button type="button" onClick={() => editor.chain().focus().setFontSize("14px").run()} disabled={isSaving} className={toolbarButtonClass(!editor.isActive("textStyle", { fontSize: "16px" }) && !editor.isActive("heading"))} title="Normal text">
+            <span className="text-xs font-bold">A</span>
+          </button>
+        </div>
+        <div className="overflow-y-auto max-h-[400px]">
+          <EditorContent
+            editor={editor}
+            spellCheck={false}
+            className="bg-gray-50 p-4 text-left text-sm text-gray-900 [&_.ProseMirror]:min-h-[180px] [&_.ProseMirror]:outline-none [&_.ProseMirror_ol]:list-decimal [&_.ProseMirror_ol]:pl-6 [&_.ProseMirror_ol]:my-2 [&_.ProseMirror_ul]:list-disc [&_.ProseMirror_ul]:pl-6 [&_.ProseMirror_ul]:my-2 [&_.ProseMirror_li]:my-1 [&_.ProseMirror_h3]:font-bold [&_.ProseMirror_h3]:text-base [&_.ProseMirror_h3]:mt-4 [&_.ProseMirror_h3]:mb-2"
+          />
+        </div>
       </div>
-      <EditorContent
-        editor={editor}
-        className="min-h-[200px] rounded-lg border border-gray-200 bg-gray-50 p-4 text-left text-sm text-gray-900 [&_.ProseMirror]:min-h-[180px] [&_.ProseMirror]:outline-none [&_.ProseMirror_ol]:list-decimal [&_.ProseMirror_ol]:pl-6 [&_.ProseMirror_ol]:my-2 [&_.ProseMirror_ul]:list-disc [&_.ProseMirror_ul]:pl-6 [&_.ProseMirror_ul]:my-2 [&_.ProseMirror_li]:my-1 [&_.ProseMirror_h3]:font-bold [&_.ProseMirror_h3]:text-base [&_.ProseMirror_h3]:mt-4 [&_.ProseMirror_h3]:mb-2"
-      />
       <div className="mt-3 flex gap-2">
         <button
           type="button"

@@ -1,5 +1,6 @@
 import { marked } from 'marked';
 import TurndownService from 'turndown';
+import { ensureBlankLineAfterSections } from '@/lib/summary-format';
 
 const HEADING_NAMES = [
   'Ringkasan Eksekutif',
@@ -15,13 +16,8 @@ const HEADING_NAMES = [
 ];
 
 export function markdownToHtml(markdown: string): string {
-  // Configure marked to NOT wrap list items in <p> tags
-  marked.use({
-    gfm: true,
-    breaks: false,
-  });
-
-  const html = marked.parse(markdown, { async: false }) as string;
+  const processed = ensureBlankLineAfterSections(markdown);
+  const html = marked.parse(processed, { async: false }) as string;
   let result = html;
 
   // Fix <li><p>text</p></li> → <li>text</li>
@@ -29,12 +25,10 @@ export function markdownToHtml(markdown: string): string {
 
   for (const heading of HEADING_NAMES) {
     const escaped = heading.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    // Case 1: standalone bold paragraph → heading
     result = result.replace(
       new RegExp(`<p><strong>${escaped}[^<]*<\\/strong><\\/p>`, 'g'),
       `<h3>${heading}</h3>`
     );
-    // Case 2: bold heading + space + content in same paragraph → split into heading + paragraph
     result = result.replace(
       new RegExp(`<p><strong>(${escaped}[^<]*)<\\/strong>[\\s]+([\\s\\S]*?)<\\/p>`, 'g'),
       `<h3>$1</h3><p>$2</p>`

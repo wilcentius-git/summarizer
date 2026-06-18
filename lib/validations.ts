@@ -9,8 +9,7 @@ export const whitelistNipSchema = z.object({
   nip: z
     .string()
     .trim()
-    .min(1, "NIP is required")
-    .max(30, "NIP tidak valid"),
+    .regex(/^\d{18}$/, "NIP harus terdiri dari 18 digit angka"),
   satuanKerjaId: z.string().trim().min(1, "Satuan kerja wajib dipilih"),
 });
 

@@ -1,6 +1,6 @@
 {
   "name": "summarizer",
-  "version": "0.34.1",
+  "version": "0.35.0",
   "private": true,
   "prisma": {
     "seed": "tsx prisma/seed.ts"
@@ -24,7 +24,9 @@
     "@ffprobe-installer/ffprobe": "^2.1.2",
     "@napi-rs/canvas": "^0.1.93",
     "@prisma/client": "^6.0.0",
+    "@tiptap/extension-font-size": "^3.0.0-next.3",
     "@tiptap/extension-list": "^3.26.1",
+    "@tiptap/extension-text-style": "^3.27.0",
     "@tiptap/pm": "^3.26.1",
     "@tiptap/react": "^3.26.1",
     "@tiptap/starter-kit": "^3.26.1",

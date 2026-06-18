@@ -223,6 +223,10 @@ export default function AdminWhitelistPage() {
       setAddError("NIP wajib diisi");
       return;
     }
+    if (!/^\d{18}$/.test(trimmed)) {
+      setAddError("NIP harus terdiri dari 18 digit angka");
+      return;
+    }
     if (!addSatuanKerjaId) {
       setAddError("Satuan kerja wajib dipilih");
       return;
@@ -536,9 +540,12 @@ export default function AdminWhitelistPage() {
           <form onSubmit={handleAdd} className="flex flex-col gap-3">
             <input
               type="text"
+              inputMode="numeric"
+              maxLength={18}
               value={nipInput}
               onChange={(e) => {
-                setNipInput(e.target.value);
+                const val = e.target.value.replace(/\D/g, "");
+                setNipInput(val);
                 if (addError) setAddError(null);
               }}
               placeholder="Masukkan NIP"

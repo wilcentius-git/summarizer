@@ -22,6 +22,13 @@ export async function writeAuditLog({
         metadata: metadata ? (metadata as Prisma.InputJsonValue) : undefined,
       },
     });
+    await prisma.auditLog.deleteMany({
+      where: {
+        createdAt: {
+          lt: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
+        },
+      },
+    });
   } catch {
     // Audit logging must never crash the main flow.
   }

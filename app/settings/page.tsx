@@ -1,41 +1,27 @@
 "use client";
 
-import { ArrowLeft, ChevronRight } from "lucide-react";
-import Link from "next/link";
+import { ArrowLeft } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 
 import { useAuth } from "@/app/contexts/AuthContext";
 import { useGroqApiKey } from "@/app/hooks/useGroqApiKey";
 
-const MENU_ITEMS = [
-  {
-    href: "/admin/whitelist",
-    title: "Kelola Whitelist",
-    description:
-      "Tambah atau hapus NIP yang diizinkan mengakses aplikasi, serta kelola satuan kerja.",
-  },
-  {
-    href: "/admin/logs",
-    title: "Audit Logs",
-    description:
-      "Lihat riwayat aktivitas login, pekerjaan ringkasan, dan tindakan administrasi.",
-  },
-] as const;
-
-export default function AdminSettingsPage() {
+export default function SettingsPage() {
   const router = useRouter();
   const { user, loading: authLoading } = useAuth();
   const { groqApiKey, setGroqApiKey } = useGroqApiKey();
 
   useEffect(() => {
     if (authLoading) return;
-    if (!user?.isAdmin) {
+    if (!user) {
       router.replace("/");
+    } else if (user.isAdmin) {
+      router.replace("/admin/settings");
     }
   }, [authLoading, user, router]);
 
-  if (authLoading || !user?.isAdmin) {
+  if (authLoading || !user || user.isAdmin) {
     return (
       <main className="min-h-screen bg-kemenkum-blue py-8 px-4 flex justify-center items-center overflow-y-auto">
         <div className="w-full max-w-3xl bg-white rounded-lg shadow-lg px-4 sm:px-8 pt-4 pb-10 mx-auto overflow-x-hidden text-center">
@@ -47,7 +33,7 @@ export default function AdminSettingsPage() {
 
   return (
     <main className="min-h-screen bg-kemenkum-blue py-8 px-4 flex justify-center items-center overflow-y-auto">
-      <div className="w-full max-w-3xl bg-white rounded-lg shadow-lg px-4 sm:px-8 pt-4 pb-10 mx-auto overflow-x-hidden text-center">
+      <div className="w-full max-w-3xl bg-white rounded-lg shadow-lg px-4 sm:px-8 pt-4 pb-10 mx-auto overflow-x-hidden">
         <div className="flex items-center gap-3 mb-6">
           <button
             type="button"
@@ -57,13 +43,10 @@ export default function AdminSettingsPage() {
           >
             <ArrowLeft size={24} strokeWidth={2.5} />
           </button>
-          <h1 className="text-xl font-bold text-kemenkum-blue truncate">
-            Pengaturan Admin
-          </h1>
+          <h1 className="text-xl font-bold text-kemenkum-blue truncate">Pengaturan</h1>
         </div>
-
-        <div className="mb-6 pb-6 border-b border-gray-100 text-left">
-          <p className="text-xs text-gray-500 mb-3">
+        <div className="space-y-2">
+          <p className="text-xs text-gray-500">
             Bawa sendiri hanya jika server belum mengatur{" "}
             <code className="text-gray-600">GROQ_API_KEY</code>. Kunci gratis di{" "}
             <a
@@ -78,7 +61,7 @@ export default function AdminSettingsPage() {
           </p>
           <label
             htmlFor="groq-api-key"
-            className="block text-sm font-medium text-gray-700 mb-1"
+            className="block text-sm font-medium text-gray-700 mt-3 mb-1"
           >
             Groq API Key
           </label>
@@ -90,28 +73,6 @@ export default function AdminSettingsPage() {
             placeholder="Kosongkan jika memakai kunci server"
             className="w-full rounded-lg border border-gray-300 px-3 py-2 text-gray-900 placeholder-gray-400 focus:border-kemenkum-blue focus:outline-none focus:ring-1 focus:ring-kemenkum-blue"
           />
-        </div>
-
-        <div className="space-y-4 text-left">
-          {MENU_ITEMS.map((item) => (
-            <Link
-              key={item.href}
-              href={item.href}
-              className="flex items-center justify-between gap-4 rounded-lg border border-gray-200 px-4 py-4 hover:border-kemenkum-blue hover:bg-kemenkum-blue/5 transition-colors"
-            >
-              <div>
-                <h2 className="text-base font-semibold text-kemenkum-blue">
-                  {item.title}
-                </h2>
-                <p className="mt-1 text-sm text-gray-600">{item.description}</p>
-              </div>
-              <ChevronRight
-                size={20}
-                strokeWidth={2.5}
-                className="shrink-0 text-kemenkum-blue"
-              />
-            </Link>
-          ))}
         </div>
       </div>
     </main>

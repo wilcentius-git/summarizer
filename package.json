@@ -1,6 +1,6 @@
 {
   "name": "summarizer",
-  "version": "0.35.3",
+  "version": "0.36.0",
   "private": true,
   "prisma": {
     "seed": "tsx prisma/seed.ts"
@@ -55,6 +55,7 @@
     "@types/fluent-ffmpeg": "^2.1.28",
     "@types/node": "^22.9.0",
     "@types/pdf-parse": "^1.1.4",
+    "@types/pdfmake": "^0.3.3",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@types/turndown": "^5.0.6",

@@ -75,16 +75,14 @@ export default function Home() {
               {user.name?.trim() || user.email}
             </span>
             <div className="flex items-center shrink-0">
-              {user.isAdmin && (
-                <button
-                  type="button"
-                  onClick={() => router.push("/admin/settings")}
-                  aria-label="Admin settings"
-                  className="p-2 rounded-lg text-kemenkum-blue hover:opacity-80 shrink-0"
-                >
-                  <Settings size={24} strokeWidth={2.5} />
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={() => router.push(user.isAdmin ? "/admin/settings" : "/settings")}
+                aria-label="Pengaturan"
+                className="p-2 rounded-lg text-kemenkum-blue hover:opacity-80 shrink-0"
+              >
+                <Settings size={24} strokeWidth={2.5} />
+              </button>
               <button
                 type="button"
                 onClick={logout}
@@ -123,40 +121,6 @@ export default function Home() {
         <p className="text-gray-600 mb-6">
           Unggah file audio untuk diringkas.
         </p>
-
-        <details className="w-full max-w-md mx-auto mb-6 group">
-          <summary className="cursor-pointer list-none text-sm text-gray-600 hover:text-kemenkum-blue [&::-webkit-details-marker]:hidden flex w-full items-center justify-center gap-2 text-center">
-            <span className="inline-block transition-transform group-open:rotate-90 text-gray-400">▸</span>
-            kunci groq sendiri(opsional)
-          </summary>
-          <div className="mt-3 pt-2 border-t border-gray-100 text-left">
-            <p className="text-xs text-gray-500 mb-2">
-              Bawa sendiri hanya jika server belum mengatur <code className="text-gray-600">GROQ_API_KEY</code>.
-              Kunci gratis di{" "}
-              <a
-                href="https://console.groq.com"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-kemenkum-blue hover:underline"
-              >
-                console.groq.com
-              </a>
-              {" "}
-              (disimpan selama sesi peramban).
-            </p>
-            <label htmlFor="groq-api-key" className="block text-sm font-medium text-gray-700 mb-1">
-              Groq API Key
-            </label>
-            <input
-              id="groq-api-key"
-              type="password"
-              value={groqApiKey}
-              onChange={(e) => setGroqApiKey(e.target.value)}
-              placeholder="Kosongkan jika memakai kunci server"
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-gray-900 placeholder-gray-400 focus:border-kemenkum-blue focus:outline-none focus:ring-1 focus:ring-kemenkum-blue"
-            />
-          </div>
-        </details>
 
         <div
           onDragEnter={handleDrag}

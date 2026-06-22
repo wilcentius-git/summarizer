@@ -11,8 +11,7 @@ export function prepareContentForPdf(text: string): string {
   return sanitizeMultilineText(text)
     .replace(/^#+\s*/gm, "")
     .replace(/^(\s*)[-*]\s+/gm, "$1• ")
-    .replace(/(:\*\*)\s*\n+/g, "$1 ")
-    .replace(/≈/g, "~");
+    .replace(/(:\*\*)\s*\n+/g, "$1 ");
 }
 
 /** Split text into segments alternating between normal and bold (from **...**). */
@@ -68,7 +67,7 @@ export function renderPdfContent(
     bold: boolean,
     x: number
   ): { nextX: number; nextY: number } => {
-    doc.setFont("helvetica", bold ? "bold" : "normal");
+    doc.setFont("NotoSans", bold ? "bold" : "normal");
     doc.setFontSize(fontSize);
 
     let drawX = x;
@@ -96,7 +95,7 @@ export function renderPdfContent(
         doc.addPage();
         nextY = opts.margin;
       }
-      doc.setFont("helvetica", bold ? "bold" : "normal");
+      doc.setFont("NotoSans", bold ? "bold" : "normal");
       doc.setFontSize(fontSize);
       doc.text(wrapped[i], margin, nextY);
       nextX = margin + doc.getTextDimensions(wrapped[i]).w;
@@ -160,6 +159,31 @@ export async function buildJobPdf(
   const content = prepareContentForPdf(text);
   const { jsPDF } = await import("jspdf");
   const doc = new jsPDF({ unit: "mm", format: "a4" });
+
+  const toBinaryString = (buffer: ArrayBuffer) => {
+    const bytes = new Uint8Array(buffer);
+    let binary = "";
+    const chunkSize = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+    }
+    return binary;
+  };
+
+  const regularResponse = await fetch("/fonts/NotoSans-Regular.ttf");
+  const regularBase64 = toBinaryString(await regularResponse.arrayBuffer());
+  doc.addFileToVFS("NotoSans-Regular.ttf", regularBase64);
+  doc.addFont("NotoSans-Regular.ttf", "NotoSans", "normal");
+
+  const boldResponse = await fetch("/fonts/NotoSans-Bold.ttf");
+  const boldBase64 = toBinaryString(await boldResponse.arrayBuffer());
+  doc.addFileToVFS("NotoSans-Bold.ttf", boldBase64);
+  doc.addFont("NotoSans-Bold.ttf", "NotoSans", "bold");
+
+  console.log("registered fonts:", JSON.stringify(doc.getFontList()));
+
+  doc.setFont("NotoSans", "normal");
+
   const margin = 20;
   const maxWidth = 210 - margin * 2;
   const lineHeight = 6;
@@ -170,7 +194,7 @@ export async function buildJobPdf(
 
   let y = margin;
 
-  doc.setFont("helvetica", "normal");
+  doc.setFont("NotoSans", "normal");
   doc.setFontSize(10);
   doc.setTextColor(100, 100, 100);
 

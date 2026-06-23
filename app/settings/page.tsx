@@ -1,8 +1,8 @@
 "use client";
 
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, Eye, EyeOff } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 
 import { useAuth } from "@/app/contexts/AuthContext";
 import { useGroqApiKey } from "@/app/hooks/useGroqApiKey";
@@ -11,6 +11,7 @@ export default function SettingsPage() {
   const router = useRouter();
   const { user, loading: authLoading } = useAuth();
   const { groqApiKey, setGroqApiKey } = useGroqApiKey();
+  const [showGroqApiKey, setShowGroqApiKey] = useState(false);
 
   useEffect(() => {
     if (authLoading) return;
@@ -65,14 +66,24 @@ export default function SettingsPage() {
           >
             Groq API Key
           </label>
-          <input
-            id="groq-api-key"
-            type="password"
-            value={groqApiKey}
-            onChange={(e) => setGroqApiKey(e.target.value)}
-            placeholder="Kosongkan jika memakai kunci server"
-            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-gray-900 placeholder-gray-400 focus:border-kemenkum-blue focus:outline-none focus:ring-1 focus:ring-kemenkum-blue"
-          />
+          <div className="relative">
+            <input
+              id="groq-api-key"
+              type={showGroqApiKey ? "text" : "password"}
+              value={groqApiKey}
+              onChange={(e) => setGroqApiKey(e.target.value)}
+              placeholder="Kosongkan jika memakai kunci server"
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 pr-10 text-gray-900 placeholder-gray-400 focus:border-kemenkum-blue focus:outline-none focus:ring-1 focus:ring-kemenkum-blue"
+            />
+            <button
+              type="button"
+              onClick={() => setShowGroqApiKey((v) => !v)}
+              tabIndex={-1}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+            >
+              {showGroqApiKey ? <EyeOff size={16} /> : <Eye size={16} />}
+            </button>
+          </div>
         </div>
       </div>
     </main>

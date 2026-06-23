@@ -43,5 +43,9 @@ export function htmlToMarkdown(html: string): string {
     strongDelimiter: '**',
     bulletListMarker: '-',
   });
+  turndown.addRule('h3ToBold', {
+    filter: 'h3',
+    replacement: (content) => `\n\n**${content}**\n\n`,
+  });
   return turndown.turndown(html);
 }

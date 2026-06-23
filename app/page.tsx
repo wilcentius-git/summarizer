@@ -68,7 +68,7 @@ export default function Home() {
 
   return (
     <main className="min-h-screen bg-kemenkum-blue py-8 px-4 flex justify-center items-center overflow-y-auto">
-      <div className="w-full max-w-2xl bg-white rounded-lg shadow-lg px-4 sm:px-8 pt-4 pb-10 mx-auto overflow-x-hidden text-center">
+      <div className="w-full max-w-2xl bg-white rounded-lg shadow-lg px-4 sm:px-8 pt-4 pb-10 mx-auto overflow-x-hidden text-center animate-fade-slide-in">
         {user && (
           <div className="flex items-center justify-between gap-3 mb-6">
             <span className="text-base text-kemenkum-blue font-medium truncate">
@@ -286,6 +286,7 @@ export default function Home() {
         {user && (
           <HistoryPanel
             historyJobs={historyJobs}
+            fetchHistory={fetchHistory}
             resumeLoading={resumeLoading}
             resumeProgress={resumeProgress}
             onResumeJob={onResumeJob}

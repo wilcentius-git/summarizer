@@ -1,6 +1,7 @@
 "use client";
 
 import { useId, useState } from "react";
+import { Eye, EyeOff } from "lucide-react";
 
 export type PassphraseModalProps = {
   isOpen: boolean;
@@ -35,6 +36,7 @@ export function PassphraseModal({
   isLoading,
 }: PassphraseModalProps) {
   const [passphrase, setPassphrase] = useState("");
+  const [showPassphrase, setShowPassphrase] = useState(false);
   const labelId = useId();
   const titleId = useId();
   const hintId = useId();
@@ -98,17 +100,27 @@ export function PassphraseModal({
               >
                 Passphrase
               </label>
-              <input
-                id={`${labelId}-passphrase`}
-                type="password"
-                name="passphrase"
-                value={passphrase}
-                onChange={(e) => setPassphrase(e.target.value)}
-                autoComplete="off"
-                className="w-full rounded-lg border-2 border-gray-200 bg-white px-3.5 py-2.5 text-sm text-gray-900 shadow-sm transition-[border-color,box-shadow] placeholder:text-gray-400 focus:border-kemenkum-blue focus:outline-none focus:ring-2 focus:ring-kemenkum-blue/35 focus:ring-offset-2 disabled:cursor-not-allowed disabled:bg-gray-50 disabled:opacity-70"
-                disabled={isLoading}
-                aria-describedby={`${labelId}-hint`}
-              />
+              <div className="relative">
+                <input
+                  id={`${labelId}-passphrase`}
+                  type={showPassphrase ? "text" : "password"}
+                  name="passphrase"
+                  value={passphrase}
+                  onChange={(e) => setPassphrase(e.target.value)}
+                  autoComplete="off"
+                  className="w-full rounded-lg border-2 border-gray-200 bg-white px-3.5 py-2.5 pr-10 text-sm text-gray-900 shadow-sm transition-[border-color,box-shadow] placeholder:text-gray-400 focus:border-kemenkum-blue focus:outline-none focus:ring-2 focus:ring-kemenkum-blue/35 focus:ring-offset-2 disabled:cursor-not-allowed disabled:bg-gray-50 disabled:opacity-70"
+                  disabled={isLoading}
+                  aria-describedby={`${labelId}-hint`}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassphrase((v) => !v)}
+                  tabIndex={-1}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                >
+                  {showPassphrase ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
             </div>
 
             <div className="flex flex-wrap items-center justify-end gap-3">

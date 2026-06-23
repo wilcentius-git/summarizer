@@ -18,6 +18,7 @@ model User {
   createdAt    DateTime     @default(now()) @map("created_at")
   isAdmin      Boolean      @default(false) @map("is_admin")
   summaryJobs  SummaryJob[]
+  editHistory  SummaryEditHistory[]
 }
 
 model SummaryJob {
@@ -49,8 +50,25 @@ model SummaryJob {
   completedAt               DateTime? @map("completed_at")
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  editHistory SummaryEditHistory[]
 
   @@map("summary_jobs")
+}
+
+model SummaryEditHistory {
+  id          String   @id @default(cuid())
+  jobId       String   @map("job_id")
+  editedById  String   @map("edited_by_id")
+  editedAt    DateTime @default(now()) @map("edited_at")
+  textBefore  String   @map("text_before") @db.Text
+  textAfter   String   @map("text_after") @db.Text
+
+  job      SummaryJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  editedBy User       @relation(fields: [editedById], references: [id], onDelete: Cascade)
+
+  @@index([jobId])
+  @@index([editedById])
+  @@map("summary_edit_history")
 }
 
 model ApiKey {

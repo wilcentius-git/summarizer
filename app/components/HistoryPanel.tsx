@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Bold, Italic, Underline as UnderlineIcon, List, ListOrdered, Undo2, Redo2 } from "lucide-react";
+import { Bold, Italic, Underline as UnderlineIcon, List, ListOrdered, Undo2, Redo2, Clock, ArrowLeft, X } from "lucide-react";
 import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import { BulletList, OrderedList, ListItem, ListKeymap } from "@tiptap/extension-list";
@@ -71,8 +71,8 @@ function SummaryEditorPanel({
   }
 
   return (
-    <>
-      <div className="rounded-lg border border-gray-200 overflow-hidden">
+    <div className="flex flex-col flex-1 min-h-0">
+      <div className="rounded-lg border border-gray-200 overflow-hidden flex flex-col flex-1 min-h-0">
         <div className="sticky top-0 z-10 flex flex-wrap items-center gap-1 border-b border-gray-200 bg-white p-2 shadow-sm">
           {/* Undo / Redo */}
           <button type="button" onClick={() => editor.chain().focus().undo().run()} disabled={isSaving || !editor.can().undo()} className={toolbarButtonClass(!editor.can().undo())} title="Undo">
@@ -112,7 +112,7 @@ function SummaryEditorPanel({
             <span className="text-xs font-bold">A</span>
           </button>
         </div>
-        <div className="overflow-y-auto max-h-[400px]">
+        <div className="overflow-y-auto flex-1 min-h-0">
           <EditorContent
             editor={editor}
             spellCheck={false}
@@ -120,7 +120,7 @@ function SummaryEditorPanel({
           />
         </div>
       </div>
-      <div className="mt-3 flex gap-2">
+      <div className="mt-3 pb-5 flex-shrink-0 flex gap-2">
         <button
           type="button"
           onClick={onCancel}
@@ -138,7 +138,7 @@ function SummaryEditorPanel({
           {isSaving ? "Menyimpan…" : "Simpan"}
         </button>
       </div>
-    </>
+    </div>
   );
 }
 
@@ -243,6 +243,20 @@ export function HistoryPanel({
   const [isLoading, setIsLoading] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isViewingHistory, setIsViewingHistory] = useState(false);
+  const [revisionHistory, setRevisionHistory] = useState<
+    { id: string; editedAt: string; textBefore: string; textAfter: string; editorName: string }[]
+  >([]);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+  const [previewVersion, setPreviewVersion] = useState<{
+    label: string;
+    text: string;
+    filenameSuffix: string;
+  } | null>(null);
+  const [revisionExportTarget, setRevisionExportTarget] = useState<{
+    text: string;
+    filenameSuffix: string;
+  } | null>(null);
   const sectionRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
@@ -256,6 +270,8 @@ export function HistoryPanel({
   useEffect(() => {
     if (!modal) {
       setIsEditing(false);
+      setIsViewingHistory(false);
+      setRevisionHistory([]);
       return;
     }
     const onKey = (e: KeyboardEvent) => {
@@ -264,6 +280,13 @@ export function HistoryPanel({
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [modal]);
+
+  useEffect(() => {
+    if (!isViewingHistory) {
+      setPreviewVersion(null);
+      setRevisionExportTarget(null);
+    }
+  }, [isViewingHistory]);
 
   const handleSaveSummary = useCallback(
     async (markdown: string) => {
@@ -302,17 +325,24 @@ export function HistoryPanel({
     [modal, fetchHistory]
   );
 
-  const buildExportDoc = useCallback(async () => {
-    if (!modal) return null;
-    const text =
-      modal.type === "rangkuman" ? modal.job.summaryText! : modal.job.sourceText!;
-    const doc = await buildJobPdf(text, modal.job.filename);
-    if (!doc) throw new Error("Tidak ada teks untuk diekspor.");
-    const fileStem = sanitizeTitleForFilename(modal.job.filename);
-    const outPdf =
-      modal.type === "transkrip" ? `transkrip-${fileStem}.pdf` : `rangkuman-${fileStem}.pdf`;
-    return { doc, outPdf };
-  }, [modal]);
+  const buildExportDoc = useCallback(
+    async (override: { text: string; filenameSuffix: string } | null) => {
+      if (!modal) return null;
+      const text = override
+        ? override.text
+        : modal.type === "rangkuman"
+          ? modal.job.summaryText!
+          : modal.job.sourceText!;
+      const doc = await buildJobPdf(text, modal.job.filename);
+      if (!doc) throw new Error("Tidak ada teks untuk diekspor.");
+      const fileStem = sanitizeTitleForFilename(modal.job.filename);
+      const baseName =
+        modal.type === "transkrip" ? `transkrip-${fileStem}` : `rangkuman-${fileStem}`;
+      const outPdf = `${baseName}${override?.filenameSuffix ?? ""}.pdf`;
+      return { doc, outPdf };
+    },
+    [modal]
+  );
 
   const onPassphraseExportConfirm = useCallback(
     async (passphrase: string) => {
@@ -327,11 +357,13 @@ export function HistoryPanel({
       }
       setIsLoading(true);
       try {
-        const payload = await buildExportDoc();
+        const override = revisionExportTarget;
+        const payload = await buildExportDoc(override);
         if (!payload) return;
         const { doc, outPdf } = payload;
         await signAndExportPdf(doc, passphrase, user.id, outPdf);
         setIsModalOpen(false);
+        setRevisionExportTarget(null);
       } catch (e) {
         const msg = e instanceof Error ? e.message : "Gagal mengekspor PDF. Coba lagi.";
         window.alert(msg);
@@ -340,8 +372,31 @@ export function HistoryPanel({
         setIsLoading(false);
       }
     },
-    [modal, user, buildExportDoc]
+    [modal, user, buildExportDoc, revisionExportTarget]
   );
+
+  const fetchRevisionHistory = useCallback(async () => {
+    if (!modal) return;
+    setIsLoadingHistory(true);
+    try {
+      const res = await fetch(
+        `/api/summary-jobs/${encodeURIComponent(modal.job.id)}/history`,
+        { credentials: "include" }
+      );
+      if (res.ok) {
+        const data = (await res.json()) as {
+          id: string;
+          editedAt: string;
+          textBefore: string;
+          textAfter: string;
+          editorName: string;
+        }[];
+        setRevisionHistory(data);
+      }
+    } finally {
+      setIsLoadingHistory(false);
+    }
+  }, [modal]);
 
   const deleteHistoryJob = useCallback(
     async (jobId: string) => {
@@ -363,11 +418,19 @@ export function HistoryPanel({
         aria-expanded={historyExpanded}
         className="flex items-center justify-start gap-2 w-full py-2 text-base font-semibold text-kemenkum-blue rounded-lg"
       >
-        <span aria-hidden>{historyExpanded ? "▼" : "▶"}</span>
+        <span
+          aria-hidden
+          className={`transition-transform duration-300 inline-block ${historyExpanded ? "rotate-90" : "rotate-0"}`}
+        >
+          ▶
+        </span>
         Riwayat Unggahan ({historyJobs.length})
       </button>
-      {historyExpanded && (
-        <div className="mt-3 text-left">
+      <div
+        className={`mt-3 text-left overflow-hidden transition-all duration-300 ease-in-out ${
+          historyExpanded ? "max-h-[500px] opacity-100" : "max-h-0 opacity-0"
+        }`}
+      >
           {historyJobs.length === 0 ? (
             <p className="text-sm text-gray-500 py-4">Belum ada riwayat. Unggah dan rangkum file untuk melihat riwayat di sini.</p>
           ) : (
@@ -476,25 +539,68 @@ export function HistoryPanel({
               ))}
             </ul>
           )}
-        </div>
-      )}
+      </div>
       {modal && (
         <>
           {/* Backdrop */}
           <div
-            className="fixed inset-0 z-40 bg-black/50"
+            className="fixed inset-0 z-40 bg-black/50 animate-fade-in"
             onClick={() => setModal(null)}
           />
           {/* Modal */}
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <div className="bg-white rounded-xl shadow-xl w-[calc(100%-2rem)] max-w-xl mx-auto max-h-[90vh] my-8 flex flex-col">
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 overflow-y-auto">
+            <div className="bg-white rounded-xl shadow-xl w-full max-w-xl mx-auto max-h-[75vh] flex flex-col overflow-hidden animate-fade-slide-in">
               {/* Header */}
               <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200">
-                <h2 className="text-base font-semibold text-gray-800">
-                  {modal.type === "transkrip" ? "Transkrip" : "Rangkuman"}
-                </h2>
                 <div className="flex items-center gap-2">
-                  {user?.isAdmin && (
+                  {!isViewingHistory && (
+                    <button
+                      type="button"
+                      onClick={() => setModal(null)}
+                      aria-label="Tutup"
+                      className="rounded-md p-2 text-gray-700 hover:bg-gray-200 transition-colors"
+                    >
+                      <ArrowLeft size={18} />
+                    </button>
+                  )}
+                  {isViewingHistory && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (previewVersion) setPreviewVersion(null);
+                        else setIsViewingHistory(false);
+                      }}
+                      className="rounded-md p-1.5 text-gray-700 hover:bg-gray-200 transition-colors"
+                      aria-label="Kembali"
+                    >
+                      <ArrowLeft size={16} />
+                    </button>
+                  )}
+                  <h2 className="text-base font-semibold text-gray-800">
+                    {previewVersion
+                      ? previewVersion.label
+                      : isViewingHistory
+                        ? "Riwayat Revisi"
+                        : modal.type === "transkrip"
+                          ? "Transkrip"
+                          : "Rangkuman"}
+                  </h2>
+                </div>
+                <div className="flex items-center gap-2">
+                  {modal.type === "rangkuman" && !isEditing && !isViewingHistory && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void fetchRevisionHistory();
+                        setIsViewingHistory(true);
+                      }}
+                      aria-label="Riwayat Revisi"
+                      className="rounded-md p-2 text-gray-700 hover:bg-gray-200 transition-colors"
+                    >
+                      <Clock size={18} />
+                    </button>
+                  )}
+                  {user?.isAdmin && !isViewingHistory && (
                     <button
                       type="button"
                       onClick={() => {
@@ -509,7 +615,7 @@ export function HistoryPanel({
                       Salin
                     </button>
                   )}
-                  {modal.type === "rangkuman" && !isEditing && (
+                  {modal.type === "rangkuman" && !isEditing && !isViewingHistory && (
                     <button
                       type="button"
                       onClick={() => setIsEditing(true)}
@@ -518,7 +624,44 @@ export function HistoryPanel({
                       Edit
                     </button>
                   )}
-                  {!isEditing && (
+                  {previewVersion && (
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        if (!user) {
+                          window.alert("Sesi tidak valid. Silakan masuk kembali.");
+                          return;
+                        }
+                        const override = {
+                          text: previewVersion.text,
+                          filenameSuffix: previewVersion.filenameSuffix,
+                        };
+                        if (user.isAdmin) {
+                          setIsLoading(true);
+                          try {
+                            const payload = await buildExportDoc(override);
+                            if (!payload) return;
+                            payload.doc.save(payload.outPdf);
+                          } catch (e) {
+                            const msg =
+                              e instanceof Error ? e.message : "Gagal mengekspor PDF. Coba lagi.";
+                            window.alert(msg);
+                            console.error(e);
+                          } finally {
+                            setIsLoading(false);
+                          }
+                          return;
+                        }
+                        setRevisionExportTarget(override);
+                        setPassphraseModalKey((k) => k + 1);
+                        setIsModalOpen(true);
+                      }}
+                      className="px-3 py-1.5 rounded-lg bg-yellow-400 text-gray-900 text-sm font-medium hover:opacity-90"
+                    >
+                      Export PDF
+                    </button>
+                  )}
+                  {!isEditing && !isViewingHistory && (
                   <button
                     type="button"
                     onClick={async () => {
@@ -529,7 +672,7 @@ export function HistoryPanel({
                       if (user.isAdmin) {
                         setIsLoading(true);
                         try {
-                          const { doc, outPdf } = (await buildExportDoc())!;
+                          const { doc, outPdf } = (await buildExportDoc(null))!;
                           doc.save(outPdf);
                         } catch (e) {
                           const msg =
@@ -549,23 +692,133 @@ export function HistoryPanel({
                     Export PDF
                   </button>
                   )}
-                  <button
-                    type="button"
-                    onClick={() => setModal(null)}
-                    className="px-3 py-1.5 rounded-lg bg-gray-100 text-gray-600 text-sm font-medium hover:bg-gray-200"
-                  >
-                    Tutup
-                  </button>
                 </div>
               </div>
               {/* Content */}
               <div
-                className={`overflow-y-auto p-5 flex-1 ${isEditing ? "" : "select-none"}`}
+                className={`flex-1 ${isEditing ? "pt-5 px-5 pb-0 flex flex-col overflow-hidden" : "p-5 overflow-y-auto select-none"}`}
                 onCopy={isEditing ? undefined : (e) => e.preventDefault()}
                 onCut={isEditing ? undefined : (e) => e.preventDefault()}
                 onContextMenu={isEditing ? undefined : (e) => e.preventDefault()}
               >
-                {modal.type === "transkrip" ? (
+                <div
+                  key={
+                    isViewingHistory
+                      ? previewVersion
+                        ? `preview-${previewVersion.label}`
+                        : "history-list"
+                      : isEditing
+                        ? "editing"
+                        : modal.type === "transkrip"
+                          ? "transkrip"
+                          : "rangkuman"
+                  }
+                  className="animate-fade-in flex-1 flex flex-col min-h-0"
+                >
+                {isViewingHistory ? (
+                  previewVersion ? (
+                    <div className="text-left [&_*]:text-left">
+                      <SummaryMarkdownBody
+                        text={previewVersion.text}
+                        className="rounded-lg bg-gray-50"
+                      />
+                    </div>
+                  ) : isLoadingHistory ? (
+                    <p className="text-center text-sm text-gray-600">Memuat…</p>
+                  ) : revisionHistory.length === 0 ? (
+                    <p className="text-sm text-gray-500">Belum ada riwayat revisi.</p>
+                  ) : (() => {
+                    const chronological = [...revisionHistory].sort(
+                      (a, b) =>
+                        new Date(a.editedAt).getTime() - new Date(b.editedAt).getTime()
+                    );
+                    const versions = [
+                      {
+                        label: "Original",
+                        text: chronological[0].textBefore,
+                        editorName: null as string | null,
+                        editedAt: null as string | null,
+                        filenameSuffix: "",
+                      },
+                      ...chronological.map((entry, i) => ({
+                        label: `Revisi ${i + 1}`,
+                        text: entry.textAfter,
+                        editorName: entry.editorName,
+                        editedAt: entry.editedAt,
+                        filenameSuffix: `_rev_${i + 1}`,
+                      })),
+                    ];
+                    return (
+                      <ul className="space-y-0 text-left">
+                        {versions.slice().reverse().map((version, index) => (
+                          <li
+                            key={index}
+                            onClick={() =>
+                              setPreviewVersion({
+                                label: version.label,
+                                text: version.text,
+                                filenameSuffix: version.filenameSuffix,
+                              })
+                            }
+                            className="border-b border-gray-100 px-3 py-3 last:border-b-0 cursor-pointer hover:bg-gray-50 rounded-lg transition-colors"
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="min-w-0 text-left">
+                                <p className="text-sm font-medium text-gray-900">{version.label}</p>
+                                {version.editorName != null && version.editedAt != null && (
+                                  <p className="text-xs text-gray-500 mt-0.5">
+                                    Diedit oleh {version.editorName} •{" "}
+                                    {new Date(version.editedAt).toLocaleString("id-ID")}
+                                  </p>
+                                )}
+                              </div>
+                              <div className="flex shrink-0 gap-2">
+                                <button
+                                  type="button"
+                                  onClick={async (e) => {
+                                    e.stopPropagation();
+                                    if (!user) {
+                                      window.alert("Sesi tidak valid. Silakan masuk kembali.");
+                                      return;
+                                    }
+                                    const override = {
+                                      text: version.text,
+                                      filenameSuffix: version.filenameSuffix,
+                                    };
+                                    if (user.isAdmin) {
+                                      setIsLoading(true);
+                                      try {
+                                        const payload = await buildExportDoc(override);
+                                        if (!payload) return;
+                                        payload.doc.save(payload.outPdf);
+                                      } catch (e) {
+                                        const msg =
+                                          e instanceof Error
+                                            ? e.message
+                                            : "Gagal mengekspor PDF. Coba lagi.";
+                                        window.alert(msg);
+                                        console.error(e);
+                                      } finally {
+                                        setIsLoading(false);
+                                      }
+                                      return;
+                                    }
+                                    setRevisionExportTarget(override);
+                                    setPassphraseModalKey((k) => k + 1);
+                                    setIsModalOpen(true);
+                                  }}
+                                  className="px-2.5 py-1 rounded text-xs font-medium bg-yellow-400 text-gray-900 hover:opacity-90"
+                                >
+                                  Export PDF
+                                </button>
+                              </div>
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
+                    );
+                  })()
+                ) : modal.type === "transkrip" ? (
                   <RawResult
                     label=""
                     text={modal.job.sourceText!}
@@ -588,6 +841,7 @@ export function HistoryPanel({
                     />
                   </div>
                 )}
+                </div>
               </div>
             </div>
           </div>

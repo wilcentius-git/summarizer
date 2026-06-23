@@ -53,6 +53,7 @@ export function renderPdfContent(
   } = opts;
 
   let y = startY;
+  let currentFontSize = fontSize;
   const lines = content.split("\n");
 
   const addPageIfNeeded = () => {
@@ -65,10 +66,11 @@ export function renderPdfContent(
   const drawSegment = (
     text: string,
     bold: boolean,
-    x: number
+    x: number,
+    hangingIndent: number = margin
   ): { nextX: number; nextY: number } => {
     doc.setFont("NotoSans", bold ? "bold" : "normal");
-    doc.setFontSize(fontSize);
+    doc.setFontSize(currentFontSize);
 
     let drawX = x;
     let availableWidth = maxWidth - (x - margin);
@@ -96,9 +98,9 @@ export function renderPdfContent(
         nextY = opts.margin;
       }
       doc.setFont("NotoSans", bold ? "bold" : "normal");
-      doc.setFontSize(fontSize);
-      doc.text(wrapped[i], margin, nextY);
-      nextX = margin + doc.getTextDimensions(wrapped[i]).w;
+      doc.setFontSize(currentFontSize);
+      doc.text(wrapped[i], hangingIndent, nextY);
+      nextX = hangingIndent + doc.getTextDimensions(wrapped[i]).w;
     }
     y = nextY;
     return { nextX, nextY };
@@ -108,27 +110,77 @@ export function renderPdfContent(
     const line = lines[i];
 
     if (line.trim() === "") {
-      y += paragraphSpacing;
-      addPageIfNeeded();
+      let prevNonEmpty: string | null = null;
+      for (let j = i - 1; j >= 0; j--) {
+        if (lines[j].trim() !== "") {
+          prevNonEmpty = lines[j];
+          break;
+        }
+      }
+      let nextNonEmpty: string | null = null;
+      for (let j = i + 1; j < lines.length; j++) {
+        if (lines[j].trim() !== "") {
+          nextNonEmpty = lines[j];
+          break;
+        }
+      }
+      const betweenNumberedItems =
+        prevNonEmpty !== null &&
+        nextNonEmpty !== null &&
+        /^\d+\.\s/.test(prevNonEmpty) &&
+        /^\d+\.\s/.test(nextNonEmpty);
+      if (!betweenNumberedItems) {
+        y += paragraphSpacing;
+        addPageIfNeeded();
+      } else {
+        y += 2;
+      }
       continue;
     }
-
-    const segments = splitBoldSegments(line);
-    if (segments.length === 0) continue;
-
-    let x = margin;
-    for (const seg of segments) {
-      addPageIfNeeded();
-      const { nextX, nextY } = drawSegment(seg.text, seg.bold, x);
-      x = nextX;
-      y = nextY;
-    }
-
-    y += lineHeight;
 
     const isHeading =
       !!line.match(/^(\*\*[^*]+\*\*\s*)+:?\s*$/) ||
       !!(line.match(/^\d+\.\s*\*\*[^*]+\*\*:?\s*$/) && line.length < 80);
+    if (isHeading) {
+      currentFontSize = fontSize + 2;
+      doc.setFontSize(fontSize + 2);
+    }
+
+    const numberedMatch = line.match(/^(\d+\.\s)(.*)$/);
+    let x = margin;
+    let hangingIndent = margin;
+    let segments: { text: string; bold: boolean }[];
+
+    if (numberedMatch) {
+      const prefix = numberedMatch[1];
+      addPageIfNeeded();
+      doc.setFont("NotoSans", "normal");
+      doc.setFontSize(currentFontSize);
+      doc.text(prefix, margin + 4, y);
+      x = margin + 4 + doc.getTextDimensions(prefix).w;
+      hangingIndent = margin + 4 + doc.getTextDimensions(prefix).w;
+      segments = splitBoldSegments(numberedMatch[2]);
+    } else {
+      segments = splitBoldSegments(line);
+    }
+
+    if (segments.length === 0) continue;
+    for (const seg of segments) {
+      addPageIfNeeded();
+      const { nextX, nextY } = numberedMatch
+        ? drawSegment(seg.text, seg.bold, x, hangingIndent)
+        : drawSegment(seg.text, seg.bold, x);
+      x = nextX;
+      y = nextY;
+    }
+
+    if (isHeading) {
+      currentFontSize = fontSize;
+      doc.setFontSize(fontSize);
+    }
+
+    y += lineHeight;
+
     if (isHeading) {
       y += headingSpacing;
     }
@@ -188,7 +240,7 @@ export async function buildJobPdf(
   const maxWidth = 210 - margin * 2;
   const lineHeight = 6;
   const paragraphSpacing = 4;
-  const headingSpacing = 2;
+  const headingSpacing = 0;
   const pageHeight = 297;
   const maxY = pageHeight - margin;
 

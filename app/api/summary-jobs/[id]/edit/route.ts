@@ -35,7 +35,7 @@ export async function PATCH(
 
     const job = await prisma.summaryJob.findFirst({
       where: { id: jobId, ...visibility },
-      select: { id: true },
+      select: { id: true, summaryText: true },
     });
 
     if (!job) {
@@ -47,6 +47,15 @@ export async function PATCH(
     await prisma.summaryJob.update({
       where: { id: job.id },
       data: { summaryText },
+    });
+
+    await prisma.summaryEditHistory.create({
+      data: {
+        jobId: job.id,
+        editedById: payload.userId,
+        textBefore: job.summaryText ?? "",
+        textAfter: summaryText,
+      },
     });
 
     await writeAuditLog({

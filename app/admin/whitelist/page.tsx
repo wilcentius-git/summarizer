@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, ChevronDown, ChevronRight, Pencil, X } from "lucide-react";
+import { ArrowLeft, ChevronDown, ChevronRight, Eye, EyeOff, Pencil, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { useAuth } from "@/app/contexts/AuthContext";
@@ -37,6 +37,8 @@ export default function AdminWhitelistPage() {
   const [satuanKerjaExpanded, setSatuanKerjaExpanded] = useState(false);
   const [unitNameInput, setUnitNameInput] = useState("");
   const [unitGroqKeyInput, setUnitGroqKeyInput] = useState("");
+  const [showUnitGroqKey, setShowUnitGroqKey] = useState(false);
+  const [showEditGroqKey, setShowEditGroqKey] = useState(false);
   const [unitAddLoading, setUnitAddLoading] = useState(false);
   const [unitAddError, setUnitAddError] = useState<string | null>(null);
   const [deletingUnitId, setDeletingUnitId] = useState<string | null>(null);
@@ -367,18 +369,28 @@ export default function AdminWhitelistPage() {
                     disabled={unitAddLoading}
                     className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-gray-900 placeholder-gray-400 focus:border-kemenkum-blue focus:outline-none focus:ring-1 focus:ring-kemenkum-blue disabled:opacity-60"
                   />
-                  <input
-                    type="password"
-                    value={unitGroqKeyInput}
-                    onChange={(e) => {
-                      setUnitGroqKeyInput(e.target.value);
-                      if (unitAddError) setUnitAddError(null);
-                    }}
-                    placeholder="Groq API key (gsk_...)"
-                    disabled={unitAddLoading}
-                    autoComplete="off"
-                    className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-gray-900 placeholder-gray-400 focus:border-kemenkum-blue focus:outline-none focus:ring-1 focus:ring-kemenkum-blue disabled:opacity-60 font-mono"
-                  />
+                  <div className="relative flex-1">
+                    <input
+                      type={showUnitGroqKey ? "text" : "password"}
+                      value={unitGroqKeyInput}
+                      onChange={(e) => {
+                        setUnitGroqKeyInput(e.target.value);
+                        if (unitAddError) setUnitAddError(null);
+                      }}
+                      placeholder="Groq API key (gsk_...)"
+                      disabled={unitAddLoading}
+                      autoComplete="off"
+                      className="w-full rounded-lg border border-gray-300 px-3 py-2 pr-10 text-gray-900 placeholder-gray-400 focus:border-kemenkum-blue focus:outline-none focus:ring-1 focus:ring-kemenkum-blue disabled:opacity-60 font-mono"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowUnitGroqKey((v) => !v)}
+                      tabIndex={-1}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                    >
+                      {showUnitGroqKey ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
+                  </div>
                 </div>
                 <button
                   type="submit"
@@ -469,21 +481,31 @@ export default function AdminWhitelistPage() {
                       </div>
                       {editingUnitId === unit.id && (
                         <div className="flex flex-col sm:flex-row gap-2 pb-2 text-left">
-                          <input
-                            type="password"
-                            value={groqKeyInputs[unit.id] ?? ""}
-                            onChange={(e) => {
-                              setGroqKeyInputs((prev) => ({
-                                ...prev,
-                                [unit.id]: e.target.value,
-                              }));
-                              if (groqKeySaveError) setGroqKeySaveError(null);
-                            }}
-                            placeholder="gsk_..."
-                            disabled={savingGroqKeyUnitId !== null}
-                            autoComplete="off"
-                            className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-kemenkum-blue focus:outline-none focus:ring-1 focus:ring-kemenkum-blue disabled:opacity-60 font-mono"
-                          />
+                          <div className="relative flex-1">
+                            <input
+                              type={showEditGroqKey ? "text" : "password"}
+                              value={groqKeyInputs[unit.id] ?? ""}
+                              onChange={(e) => {
+                                setGroqKeyInputs((prev) => ({
+                                  ...prev,
+                                  [unit.id]: e.target.value,
+                                }));
+                                if (groqKeySaveError) setGroqKeySaveError(null);
+                              }}
+                              placeholder="gsk_..."
+                              disabled={savingGroqKeyUnitId !== null}
+                              autoComplete="off"
+                              className="w-full rounded-lg border border-gray-300 px-3 py-2 pr-10 text-sm text-gray-900 placeholder-gray-400 focus:border-kemenkum-blue focus:outline-none focus:ring-1 focus:ring-kemenkum-blue disabled:opacity-60 font-mono"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setShowEditGroqKey((v) => !v)}
+                              tabIndex={-1}
+                              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                            >
+                              {showEditGroqKey ? <EyeOff size={16} /> : <Eye size={16} />}
+                            </button>
+                          </div>
                           <button
                             type="button"
                             onClick={() => {

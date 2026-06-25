@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Bold, Italic, Underline as UnderlineIcon, List, ListOrdered, Undo2, Redo2, Clock, ArrowLeft, X } from "lucide-react";
+import { Bold, Italic, Underline as UnderlineIcon, List, ListOrdered, Undo2, Redo2, Clock, ArrowLeft, X, FileText, ScrollText, Play, Trash2, Copy, Pencil, FileDown } from "lucide-react";
 import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import { BulletList, OrderedList, ListItem, ListKeymap } from "@tiptap/extension-list";
@@ -435,7 +435,7 @@ export function HistoryPanel({
             <p className="text-sm text-gray-500 py-4">Belum ada riwayat. Unggah dan rangkum file untuk melihat riwayat di sini.</p>
           ) : (
             <ul className="space-y-2 max-h-[400px] overflow-y-auto overflow-x-visible">
-              {historyJobs.map((job) => (
+              {historyJobs.filter((job) => job.id !== resumeLoading).map((job) => (
                 <li
                   key={job.id}
                   className="p-3 rounded-lg borderra border-gray-200 bg-white shadow-sm overflow-visible"
@@ -450,7 +450,7 @@ export function HistoryPanel({
                         )}
                       </p>
                       <span
-                        className={`inline-block mt-1 px-2 py-0.5 rounded text-xs font-medium group cursor-default ${
+                        className={`inline-block w-fit mt-1 px-2 py-0.5 rounded text-xs font-medium group cursor-default whitespace-nowrap ${
                           job.status === "completed"
                             ? "bg-emerald-100 text-emerald-800"
                             : job.status === "failed"
@@ -481,41 +481,49 @@ export function HistoryPanel({
                                   : job.status}
                       </span>
                     </div>
-                    <div className="flex items-center gap-2 flex-wrap">
+                    <div className="flex items-center gap-2 flex-wrap shrink-0">
                       {job.isResumable && (
                         <button
                           type="button"
                           onClick={() => onResumeJob(job)}
                           disabled={!!resumeLoading}
-                          className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:opacity-90 disabled:opacity-50"
+                          title="Lanjutkan"
+                          className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:opacity-90 disabled:opacity-50 inline-flex items-center gap-1.5"
                         >
-                          {resumeLoading === job.id ? "Melanjutkan…" : "Lanjutkan"}
+                          <span className="sm:hidden"><Play size={16} /></span>
+                          <span className="hidden sm:block"><Play size={20} /></span>
                         </button>
                       )}
                       {job.sourceText?.trim() && (
                         <button
                           type="button"
                           onClick={() => setModal({ type: "transkrip", job })}
-                          className="px-3 py-1.5 rounded-lg bg-kemenkum-blue text-white text-sm font-medium hover:opacity-90"
+                          title="Transkrip"
+                          className="px-3 py-1.5 rounded-lg bg-kemenkum-blue text-white text-sm font-medium hover:opacity-90 inline-flex items-center gap-1.5"
                         >
-                          Transkrip
+                          <span className="sm:hidden"><FileText size={16} /></span>
+                          <span className="hidden sm:block"><FileText size={20} /></span>
                         </button>
                       )}
                       {job.status === "completed" && job.summaryText && (
                         <button
                           type="button"
                           onClick={() => setModal({ type: "rangkuman", job })}
-                          className="px-3 py-1.5 rounded-lg bg-kemenkum-blue text-white text-sm font-medium hover:opacity-90"
+                          title="Rangkuman"
+                          className="px-3 py-1.5 rounded-lg bg-kemenkum-blue text-white text-sm font-medium hover:opacity-90 inline-flex items-center gap-1.5"
                         >
-                          Rangkuman
+                          <span className="sm:hidden"><ScrollText size={16} /></span>
+                          <span className="hidden sm:block"><ScrollText size={20} /></span>
                         </button>
                       )}
                       <button
                         type="button"
                         onClick={() => deleteHistoryJob(job.id)}
-                        className="px-3 py-1.5 rounded-lg border border-red-300 text-red-700 text-sm font-medium hover:bg-red-50"
+                        title="Hapus"
+                        className="px-3 py-1.5 rounded-lg border border-red-300 text-red-700 text-sm font-medium hover:bg-red-50 inline-flex items-center gap-1.5"
                       >
-                        Hapus
+                        <span className="sm:hidden"><Trash2 size={16} /></span>
+                        <span className="hidden sm:block"><Trash2 size={20} /></span>
                       </button>
                     </div>
                   </div>
@@ -548,8 +556,8 @@ export function HistoryPanel({
             onClick={() => setModal(null)}
           />
           {/* Modal */}
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 overflow-y-auto">
-            <div className="bg-white rounded-xl shadow-xl w-full max-w-xl mx-auto max-h-[75vh] flex flex-col overflow-hidden animate-fade-slide-in">
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div className="bg-white rounded-xl shadow-xl w-full max-w-xl mx-auto max-h-[85svh] sm:max-h-[75vh] flex flex-col overflow-hidden animate-fade-slide-in">
               {/* Header */}
               <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200">
                 <div className="flex items-center gap-2">
@@ -610,18 +618,20 @@ export function HistoryPanel({
                             : modal.job.summaryText!;
                         navigator.clipboard.writeText(text);
                       }}
-                      className="flex items-center gap-2 rounded-md bg-gray-100 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-200 transition-colors"
+                      aria-label="Salin"
+                      className="rounded-md p-2 bg-gray-100 text-gray-700 hover:bg-gray-200 transition-colors"
                     >
-                      Salin
+                      <Copy size={16} />
                     </button>
                   )}
                   {modal.type === "rangkuman" && !isEditing && !isViewingHistory && (
                     <button
                       type="button"
                       onClick={() => setIsEditing(true)}
-                      className="px-3 py-1.5 rounded-lg bg-gray-100 text-gray-700 text-sm font-medium hover:bg-gray-200"
+                      aria-label="Edit"
+                      className="rounded-md p-2 bg-gray-100 text-gray-700 hover:bg-gray-200"
                     >
-                      Edit
+                      <Pencil size={16} />
                     </button>
                   )}
                   {previewVersion && (
@@ -656,9 +666,10 @@ export function HistoryPanel({
                         setPassphraseModalKey((k) => k + 1);
                         setIsModalOpen(true);
                       }}
-                      className="px-3 py-1.5 rounded-lg bg-yellow-400 text-gray-900 text-sm font-medium hover:opacity-90"
+                      aria-label="Export PDF"
+                      className="rounded-md p-2 bg-yellow-400 text-gray-900 hover:opacity-90"
                     >
-                      Export PDF
+                      <FileDown size={16} />
                     </button>
                   )}
                   {!isEditing && !isViewingHistory && (
@@ -687,9 +698,10 @@ export function HistoryPanel({
                       setPassphraseModalKey((k) => k + 1);
                       setIsModalOpen(true);
                     }}
-                    className="px-3 py-1.5 rounded-lg bg-yellow-400 text-gray-900 text-sm font-medium hover:opacity-90"
+                    aria-label="Export PDF"
+                    className="rounded-md p-2 bg-yellow-400 text-gray-900 hover:opacity-90"
                   >
-                    Export PDF
+                    <FileDown size={16} />
                   </button>
                   )}
                 </div>

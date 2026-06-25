@@ -28,8 +28,6 @@ import {
   isAudioMimeType,
   MAX_AUDIO_SIZE_BYTES,
   resolveAudioMimeType,
-  TranscribeCancelledError,
-  transcribeWithGroq,
 } from "@/lib/transcribe-audio";
 import { deleteAudio, saveAudio } from "@/lib/audio-storage";
 import { decryptApiKey } from "@/lib/crypto";
@@ -261,61 +259,17 @@ export async function POST(request: NextRequest) {
         let audioPathToCleanup: string | null = null;
         if (isAudio) {
           const savedPath = await saveAudio(job.id, fileName, buffer);
-          audioPathToCleanup = savedPath;
-          await updateJob({ progressPercentage: 15, audioPath: savedPath });
-          send({
-            type: "progress",
-            phase: "transcribing",
-            current: 0,
-            total: 1,
-            message: "Mengirim ke Groq Whisper untuk transkripsi…",
-            step: 1,
-            stepLabel: "Transkripsi",
+          await updateJob({
+            status: "queued_transcription",
+            progressPercentage: 15,
+            audioPath: savedPath,
           });
-          try {
-            transcribeStartMs = Date.now();
-            text = await transcribeWithGroq(buffer, apiKey, {
-              fileName,
-              prompt: [
-                "Transkrip audio berikut. Jangan tambahkan teks yang tidak ada dalam audio. Jangan ulangi kata atau frasa. Jangan tambahkan 'Terima kasih' atau kalimat penutup yang tidak ada dalam audio.",
-                glossary || "",
-              ].filter(Boolean).join(" "),
-              chunkDelayMs: pipeline.transcribeChunkDelayMs,
-              isCancelled: () => isJobCancelled(job.id),
-              onChunkProgress: (current, total) => {
-                send({
-                  type: "progress",
-                  phase: "transcribing",
-                  current,
-                  total,
-                  message:
-                    total > 1
-                    ? `Transkripsi bagian ${current} dari ${total}…`
-                    : "Mengirim ke Groq Whisper untuk transkripsi…",
-                  step: 1,
-                  stepLabel: "Transkripsi",
-                });
-              },
-              onChunkDone: async (chunkIndex, _transcript, transcriptsSoFar) => {
-                await updateJob({
-                  processedTranscribeChunks: chunkIndex,
-                  partialTranscript: JSON.stringify(transcriptsSoFar),
-                });
-              },
-            });
-            transcribeEndMs = Date.now();
-            logger.log(
-              `>>> [TIMING] Transcription done in ${transcribeEndMs - transcribeStartMs!}ms`
-            );
-          } catch (transcribeErr) {
-            if (transcribeErr instanceof TranscribeCancelledError) {
-              await updateJob({ status: "cancelled" });
-              send({ type: "cancelled", message: "Dibatalkan." });
-              controller.close();
-              return;
-            }
-            throw transcribeErr;
-          }
+          send({
+            type: "queued",
+            jobId: job.id,
+            message: "Audio sedang diproses di background. Anda bisa menutup tab ini.",
+          });
+          return;
         } else {
           const ocrFallback =
             resolvedMime === "application/pdf" ? createOcrFallback(apiKey) : undefined;

@@ -1,5 +1,6 @@
 "use client";
 
+import { Pause, X } from "lucide-react";
 import { forwardRef } from "react";
 import { ProgressDisplay } from "@/app/components/ProgressDisplay";
 import type { SummarizeProgress } from "@/app/hooks/useSummarize";
@@ -48,15 +49,17 @@ export const ResumeCard = forwardRef<HTMLElement, ResumeCardProps>(function Resu
             type="button"
             onClick={onPause}
             className="px-4 py-2 rounded-lg border border-amber-300 text-amber-700 text-sm font-medium hover:bg-amber-50 whitespace-nowrap"
+            aria-label="Jeda"
           >
-            Jeda
+            <Pause className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
           </button>
           <button
             type="button"
             onClick={onAbort}
             className="px-4 py-2 rounded-lg border border-rose-300 text-rose-700 text-sm font-medium hover:bg-rose-50 whitespace-nowrap"
+            aria-label="Batalkan"
           >
-            Batalkan
+            <X className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
           </button>
         </div>
       </div>

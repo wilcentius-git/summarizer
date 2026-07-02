@@ -22,11 +22,16 @@ export default function Home() {
   const { groqApiKey, setGroqApiKey } = useGroqApiKey();
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [busyToast, setBusyToast] = useState(false);
 
   const { historyJobs, fetchHistory, deleteJob } = useHistory(user);
   const [historyFocusSignal, setHistoryFocusSignal] = useState(0);
   const bumpHistoryFocus = useCallback(() => {
     setHistoryFocusSignal((n) => n + 1);
+  }, []);
+  const handleSummarizeBusy = useCallback(() => {
+    setBusyToast(true);
+    setTimeout(() => setBusyToast(false), 2000);
   }, []);
   const {
     summarizeLoading,
@@ -182,6 +187,34 @@ export default function Home() {
                       <p className="font-medium text-gray-900 truncate">{item.name}</p>
                       <p className="text-sm text-gray-500">{formatSize(item.size)}</p>
                     </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        removeFile(item.id);
+                        setGlossaryMap((prev) => {
+                          const next = { ...prev };
+                          delete next[item.id];
+                          return next;
+                        });
+                      }}
+                      className="p-2 rounded-lg border border-gray-300 text-gray-600 hover:border-red-400 hover:text-red-600 hover:bg-red-50 flex-shrink-0"
+                      aria-label="Hapus file"
+                    >
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        width="18"
+                        height="18"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2.5"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      >
+                        <line x1="18" y1="6" x2="6" y2="18" />
+                        <line x1="6" y1="6" x2="18" y2="18" />
+                      </svg>
+                    </button>
                   </div>
                   <div className="text-left">
                     <label className="text-xs text-gray-500 mb-1 block">
@@ -221,9 +254,13 @@ export default function Home() {
                   <div className="flex flex-wrap items-center gap-2 justify-end min-w-0">
                     <button
                       type="button"
-                      onClick={() => handleSummarize(item, glossaryMap[item.id] ?? "")}
-                      disabled={!!summarizeLoading}
-                      className="px-4 py-2 rounded-lg bg-kemenkum-blue text-white text-sm font-medium hover:opacity-90 disabled:opacity-60 whitespace-nowrap"
+                      onClick={
+                        summarizeLoading
+                          ? handleSummarizeBusy
+                          : () => handleSummarize(item, glossaryMap[item.id] ?? "")
+                      }
+                      disabled={false}
+                      className={`px-4 py-2 rounded-lg bg-kemenkum-blue text-white text-sm font-medium hover:opacity-90 whitespace-nowrap ${summarizeLoading ? "opacity-60 cursor-not-allowed" : ""}`}
                     >
                       {summarizeLoading === item.id ? "Summarizing…" : "Summarize"}
                     </button>
@@ -250,38 +287,15 @@ export default function Home() {
                         </button>
                       </>
                     )}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        removeFile(item.id);
-                        setGlossaryMap((prev) => {
-                          const next = { ...prev };
-                          delete next[item.id];
-                          return next;
-                        });
-                      }}
-                      className="p-2 rounded-lg border border-gray-300 text-gray-600 hover:border-red-400 hover:text-red-600 hover:bg-red-50 flex-shrink-0"
-                      aria-label="Hapus file"
-                    >
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        width="18"
-                        height="18"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2.5"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      >
-                        <line x1="18" y1="6" x2="6" y2="18" />
-                        <line x1="6" y1="6" x2="18" y2="18" />
-                      </svg>
-                    </button>
                   </div>
                 </li>
               ))}
             </ul>
+            {busyToast && (
+              <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-gray-800 text-white text-sm px-4 py-2 rounded-lg shadow-lg z-50">
+                Summarisasi sedang berlangsung…
+              </div>
+            )}
           </section>
         )}
 

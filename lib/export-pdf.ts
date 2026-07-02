@@ -11,7 +11,12 @@ export function prepareContentForPdf(text: string): string {
   return sanitizeMultilineText(text)
     .replace(/^#+\s*/gm, "")
     .replace(/^(\s*)[-*]\s+/gm, "$1• ")
-    .replace(/(:\*\*)\s*\n+/g, "$1 ");
+    .replace(/(:\*\*)\s*\n+/g, "$1 ")
+    .replace(/≈/g, "sekitar")
+    .replace(/→/g, "->")
+    .replace(/×/g, "x")
+    .replace(/±/g, "+/-")
+    .replace(/÷/g, ":");
 }
 
 /** Split text into segments alternating between normal and bold (from **...**). */

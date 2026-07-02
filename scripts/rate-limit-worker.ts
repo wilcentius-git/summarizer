@@ -11,6 +11,7 @@
 import dotenv from "dotenv";
 dotenv.config({ path: ".env.local" });
 
+import { Prisma } from "@prisma/client";
 import { prisma } from "../lib/prisma";
 import { decryptApiKey } from "../lib/crypto";
 import { processRateLimitedJob } from "../lib/retry-summarize";
@@ -20,6 +21,12 @@ import { logger } from "../lib/logger";
 
 const CHECK_INTERVAL_MS = 5 * 1000; // 5 seconds
 const RETRY_AFTER_HOURS = 1;
+
+function isPrismaRecordNotFound(err: unknown): boolean {
+  return (
+    err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2025"
+  );
+}
 
 async function resolveGroqApiKeyForJob(userId: string): Promise<string> {
   let satuanKerjaGroqKey: string | null = null;
@@ -58,72 +65,128 @@ async function processQueuedTranscriptionJobs() {
         continue;
       }
 
-      await prisma.summaryJob.update({
-        where: { id: job.id },
+      const claimResult = await prisma.summaryJob.updateMany({
+        where: { id: job.id, status: { not: "cancelled" } },
         data: { status: "processing" },
       });
+      if (claimResult.count === 0) {
+        logger.log(`[worker] Job ${job.id} was cancelled before processing started, skipping.`);
+        continue;
+      }
 
       const result = await processTranscriptionJob(job, apiKey);
 
       if (result.success) {
-        await prisma.summaryJob.update({
-          where: { id: job.id },
-          data: {
-            status: "completed",
-            progressPercentage: 100,
-            summaryText: result.summary,
-            sourceText: result.transcript,
-            errorMessage: null,
-            retryAfter: null,
-            extractedTextForRetry: null,
-            jobRetryContext: null,
-          },
-        });
-        logger.log(`[worker] Job ${job.id} (${job.filename}) completed.`);
+        try {
+          const stillActive = await prisma.summaryJob.findUnique({
+            where: { id: job.id },
+            select: { status: true },
+          });
+          if (stillActive?.status === "cancelled") {
+            logger.log(`[worker] Job ${job.id} was cancelled during processing, not marking completed.`);
+            continue;
+          }
+          await prisma.summaryJob.update({
+            where: { id: job.id },
+            data: {
+              status: "completed",
+              progressPercentage: 100,
+              summaryText: result.summary,
+              sourceText: result.transcript,
+              errorMessage: null,
+              retryAfter: null,
+              extractedTextForRetry: null,
+              jobRetryContext: null,
+            },
+          });
+          logger.log(`[worker] Job ${job.id} (${job.filename}) completed.`);
+        } catch (guardErr) {
+          if (isPrismaRecordNotFound(guardErr)) {
+            logger.log(`[worker] Job ${job.id} no longer exists (deleted), skipping.`);
+            continue;
+          }
+          throw guardErr;
+        }
       } else if (result.rateLimited) {
-        const retryAfter = new Date(Date.now() + RETRY_AFTER_HOURS * 60 * 60 * 1000);
-        const saved = await prisma.summaryJob.findUnique({
-          where: { id: job.id },
-          select: { extractedTextForRetry: true, status: true },
-        });
-        await prisma.summaryJob.update({
-          where: { id: job.id },
-          data: {
-            status: "waiting_rate_limit",
-            retryAfter,
-            extractedTextForRetry: saved?.extractedTextForRetry ?? job.extractedTextForRetry,
-          },
-        });
-        logger.log(
-          `[worker] Job ${job.id} hit rate limit during summarization. Retry at ${retryAfter.toISOString()}.`
-        );
+        try {
+          const retryAfter = new Date(Date.now() + RETRY_AFTER_HOURS * 60 * 60 * 1000);
+          const saved = await prisma.summaryJob.findUnique({
+            where: { id: job.id },
+            select: { extractedTextForRetry: true, status: true },
+          });
+          if (saved?.status === "cancelled") {
+            logger.log(`[worker] Job ${job.id} was cancelled, skipping status update.`);
+            continue;
+          }
+          await prisma.summaryJob.update({
+            where: { id: job.id },
+            data: {
+              status: "waiting_rate_limit",
+              retryAfter,
+              extractedTextForRetry: saved?.extractedTextForRetry ?? job.extractedTextForRetry,
+            },
+          });
+          logger.log(
+            `[worker] Job ${job.id} hit rate limit during summarization. Retry at ${retryAfter.toISOString()}.`
+          );
+        } catch (guardErr) {
+          if (isPrismaRecordNotFound(guardErr)) {
+            logger.log(`[worker] Job ${job.id} no longer exists (deleted), skipping.`);
+            continue;
+          }
+          throw guardErr;
+        }
       } else {
-        const current = await prisma.summaryJob.findUnique({
+        try {
+          const stillActive = await prisma.summaryJob.findUnique({
+            where: { id: job.id },
+            select: { status: true },
+          });
+          if (stillActive?.status === "cancelled") {
+            logger.log(`[worker] Job ${job.id} was cancelled, skipping status update.`);
+            continue;
+          }
+          await prisma.summaryJob.update({
+            where: { id: job.id },
+            data: {
+              status: "failed",
+              errorMessage: result.error,
+            },
+          });
+          console.error(`[worker] Job ${job.id} failed: ${result.error}`);
+        } catch (guardErr) {
+          if (isPrismaRecordNotFound(guardErr)) {
+            logger.log(`[worker] Job ${job.id} no longer exists (deleted), skipping.`);
+            continue;
+          }
+          throw guardErr;
+        }
+      }
+    } catch (err) {
+      console.error(`[worker] Error processing transcription job ${job.id}:`, err);
+      try {
+        const stillActive = await prisma.summaryJob.findUnique({
           where: { id: job.id },
           select: { status: true },
         });
-        if (current?.status === "cancelled") {
-          logger.log(`[worker] Job ${job.id} was cancelled.`);
+        if (stillActive?.status === "cancelled") {
+          logger.log(`[worker] Job ${job.id} was cancelled, skipping status update.`);
           continue;
         }
         await prisma.summaryJob.update({
           where: { id: job.id },
           data: {
             status: "failed",
-            errorMessage: result.error,
+            errorMessage: err instanceof Error ? err.message : "Worker error",
           },
         });
-        console.error(`[worker] Job ${job.id} failed: ${result.error}`);
+      } catch (guardErr) {
+        if (isPrismaRecordNotFound(guardErr)) {
+          logger.log(`[worker] Job ${job.id} no longer exists (deleted), skipping.`);
+          continue;
+        }
+        throw guardErr;
       }
-    } catch (err) {
-      console.error(`[worker] Error processing transcription job ${job.id}:`, err);
-      await prisma.summaryJob.update({
-        where: { id: job.id },
-        data: {
-          status: "failed",
-          errorMessage: err instanceof Error ? err.message : "Worker error",
-        },
-      });
     }
   }
 }
@@ -150,62 +213,130 @@ async function processWaitingRateLimitJobs() {
             continue;
           }
 
-          await prisma.summaryJob.update({
-            where: { id: job.id },
+          const claimResult = await prisma.summaryJob.updateMany({
+            where: { id: job.id, status: { not: "cancelled" } },
             data: { status: "processing" },
           });
+          if (claimResult.count === 0) {
+            logger.log(`[worker] Job ${job.id} was cancelled before processing started, skipping.`);
+            continue;
+          }
 
           const result = await processRateLimitedJob(job, apiKey);
 
           if (result.success) {
-            await prisma.summaryJob.update({
-              where: { id: job.id },
-              data: {
-                status: "completed",
-                progressPercentage: 100,
-                summaryText: result.summary,
-                sourceText: job.extractedTextForRetry,
-                errorMessage: null,
-                retryAfter: null,
-                extractedTextForRetry: null,
-                jobRetryContext: null,
-              },
-            });
-            logger.log(`[worker] Job ${job.id} (${job.filename}) completed.`);
-          } else {
-            if (result.error.includes("Rate limit")) {
-              const retryAfter = new Date(Date.now() + RETRY_AFTER_HOURS * 60 * 60 * 1000);
-              await prisma.summaryJob.update({
+            try {
+              const stillActive = await prisma.summaryJob.findUnique({
                 where: { id: job.id },
-                data: {
-                  status: "waiting_rate_limit",
-                  retryAfter,
-                },
+                select: { status: true },
               });
-              logger.log(`[worker] Job ${job.id} hit rate limit again. Retry at ${retryAfter.toISOString()}.`);
-            } else {
+              if (stillActive?.status === "cancelled") {
+                logger.log(`[worker] Job ${job.id} was cancelled during processing, not marking completed.`);
+                continue;
+              }
               await prisma.summaryJob.update({
                 where: { id: job.id },
                 data: {
-                  status: "failed",
-                  errorMessage: result.error,
+                  status: "completed",
+                  progressPercentage: 100,
+                  summaryText: result.summary,
+                  sourceText: job.extractedTextForRetry,
+                  errorMessage: null,
                   retryAfter: null,
                   extractedTextForRetry: null,
                   jobRetryContext: null,
                 },
               });
-              console.error(`[worker] Job ${job.id} failed: ${result.error}`);
+              logger.log(`[worker] Job ${job.id} (${job.filename}) completed.`);
+            } catch (guardErr) {
+              if (isPrismaRecordNotFound(guardErr)) {
+                logger.log(`[worker] Job ${job.id} no longer exists (deleted), skipping.`);
+                continue;
+              }
+              throw guardErr;
+            }
+          } else {
+            if (result.error.includes("Rate limit")) {
+              try {
+                const retryAfter = new Date(Date.now() + RETRY_AFTER_HOURS * 60 * 60 * 1000);
+                const stillActive = await prisma.summaryJob.findUnique({
+                  where: { id: job.id },
+                  select: { status: true },
+                });
+                if (stillActive?.status === "cancelled") {
+                  logger.log(`[worker] Job ${job.id} was cancelled, skipping status update.`);
+                  continue;
+                }
+                await prisma.summaryJob.update({
+                  where: { id: job.id },
+                  data: {
+                    status: "waiting_rate_limit",
+                    retryAfter,
+                  },
+                });
+                logger.log(`[worker] Job ${job.id} hit rate limit again. Retry at ${retryAfter.toISOString()}.`);
+              } catch (guardErr) {
+                if (isPrismaRecordNotFound(guardErr)) {
+                  logger.log(`[worker] Job ${job.id} no longer exists (deleted), skipping.`);
+                  continue;
+                }
+                throw guardErr;
+              }
+            } else {
+              try {
+                const stillActive = await prisma.summaryJob.findUnique({
+                  where: { id: job.id },
+                  select: { status: true },
+                });
+                if (stillActive?.status === "cancelled") {
+                  logger.log(`[worker] Job ${job.id} was cancelled, skipping status update.`);
+                  continue;
+                }
+                await prisma.summaryJob.update({
+                  where: { id: job.id },
+                  data: {
+                    status: "failed",
+                    errorMessage: result.error,
+                    retryAfter: null,
+                    extractedTextForRetry: null,
+                    jobRetryContext: null,
+                  },
+                });
+                console.error(`[worker] Job ${job.id} failed: ${result.error}`);
+              } catch (guardErr) {
+                if (isPrismaRecordNotFound(guardErr)) {
+                  logger.log(`[worker] Job ${job.id} no longer exists (deleted), skipping.`);
+                  continue;
+                }
+                throw guardErr;
+              }
             }
           }
         } catch (err) {
           console.error(`[worker] Error processing job ${job.id}:`, err);
-          await prisma.summaryJob.update({
-            where: { id: job.id },
-            data: {
-              status: "failed",
-              errorMessage: err instanceof Error ? err.message : "Worker error",
-            },
-          });
+          try {
+            const stillActive = await prisma.summaryJob.findUnique({
+              where: { id: job.id },
+              select: { status: true },
+            });
+            if (stillActive?.status === "cancelled") {
+              logger.log(`[worker] Job ${job.id} was cancelled, skipping status update.`);
+              continue;
+            }
+            await prisma.summaryJob.update({
+              where: { id: job.id },
+              data: {
+                status: "failed",
+                errorMessage: err instanceof Error ? err.message : "Worker error",
+              },
+            });
+          } catch (guardErr) {
+            if (isPrismaRecordNotFound(guardErr)) {
+              logger.log(`[worker] Job ${job.id} no longer exists (deleted), skipping.`);
+              continue;
+            }
+            throw guardErr;
+          }
         }
       }
 }

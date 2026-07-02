@@ -4,6 +4,7 @@
  */
 
 import type { PdfPageImage } from "@/lib/pdf-to-images";
+import { logger } from "@/lib/logger";
 import {
   SUMMARIZE_PIPELINE_STANDARD,
   type SummarizePipelineConfig,
@@ -73,7 +74,7 @@ export function splitIntoChunks(text: string, maxSize: number): string[] {
 }
 
 export const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
-export const GROQ_MODEL = "llama-3.1-8b-instant";
+export const GROQ_MODEL = "openai/gpt-oss-20b";
 export const GROQ_VISION_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct";
 
 export async function callVisionApi(
@@ -195,7 +196,7 @@ PENTING: Ringkasan Eksekutif dan Insight tambahan MAKSIMAL 40 kata masing-masing
 
 1. [Heading poin pertama.] [Detail, contoh, atau fakta spesifik sebagai kalimat lanjutan dalam paragraf yang sama.]
 2. [Heading poin kedua.] [Detail lanjutan.]
-... (lanjutkan dengan nomor berurutan. Sertakan semua poin yang penting dan spesifik. Buang poin yang generik, redundan, atau tidak memberikan informasi baru. Tidak ada batas jumlah, tapi jangan tambahkan poin yang tidak bernilai. JANGAN gunakan sub-poin a., b., c.—gabungkan semua detail sebagai kalimat lanjutan dalam paragraf bernomor yang sama.)
+... (lanjutkan dengan nomor berurutan. Sertakan SEMUA topik dan subtopik yang dibahas — jangan buang konten hanya karena bersifat percakapan atau anekdotal. Untuk transkrip podcast/wawancara, setiap topik yang diangkat narasumber adalah poin yang valid. Gabungkan semua detail sebagai kalimat lanjutan dalam paragraf bernomor yang sama. JANGAN gunakan sub-poin a., b., c.)
 
 **Insight tambahan:**
 
@@ -203,16 +204,16 @@ PENTING: Ringkasan Eksekutif dan Insight tambahan MAKSIMAL 40 kata masing-masing
 
 PERAN TIAP BAGIAN (WAJIB DIPATUHI):
 - **Ringkasan Eksekutif** = ikhtisar tingkat tinggi. TIDAK BOLEH mengulang kalimat yang sama dari Rangkuman.
-- **Rangkuman** = poin-poin detail dengan fakta spesifik (nama, angka, contoh nyata). Hindari pernyataan generik yang bisa berlaku untuk topik apa saja.
+- **Rangkuman** = poin-poin detail dengan fakta spesifik (nama, angka, contoh nyata). Untuk transkrip podcast/wawancara: sertakan semua topik yang dibahas, termasuk cerita, anekdot, dan contoh konkret yang disebutkan narasumber — ini adalah konten yang bernilai, bukan noise.
 - **Insight tambahan** = takeaway non-obvious DARI narasumber/penulis. Bukan nasihat hidup umum.
 
 - Output HANYA 3 bagian. Beri baris kosong antara judul dan isi.
 - PENTING FORMAT HEADING: Setiap heading section (**Ringkasan Eksekutif:**, **Rangkuman:**, **Insight tambahan:**) harus berada di baris TERPISAH, diikuti baris kosong, lalu isinya. JANGAN gabungkan heading dan isi dalam satu baris.
 - JANGAN gunakan format notula (Metadata, Peserta Rapat, Acara, dll.) untuk dokumen ini.
-- Variasikan frasa: jangan ulangi "penulis berpendapat" berkali-kali; gunakan "menurut penulis", "penulis menyatakan", "penulis mengemukakan", dll.
+- Variasikan frasa: jangan ulangi "penulis berpendapat" berkali-kali; gunakan "menurut narasumber", "menurut pembicara", "Rocky Gerung menyatakan", dll.
 - KONSOLIDASI: Gabungkan poin yang mirip menjadi satu. Jangan ulangi ide yang sama.
 - Gunakan **bold** untuk istilah penting, nama, organisasi.
-- SPESIFISITAS: Setiap poin harus mengandung detail konkret dari sumber (siapa berkata apa, angka, contoh). Hindari kalimat generik seperti "beradaptasi dengan perubahan dapat menjadi tantangan" yang bisa berlaku untuk konteks apa saja.
+- SPESIFISITAS: Setiap poin harus mengandung detail konkret dari sumber (siapa berkata apa, contoh spesifik). Untuk podcast/wawancara, detail percakapan (siapa berkata apa kepada siapa, dalam konteks apa) adalah spesifisitas yang valid.
 
 ATURAN UMUM:
 - DEDUPLIKASI: Poin yang sama atau mirip hanya perlu disebut SATU KALI. Hindari pengulangan ide.
@@ -223,20 +224,25 @@ ATURAN UMUM:
 - Tanpa pembukaan lain, langsung rangkuman saja.
 - Pastikan rangkuman selesai lengkap; jangan potong di tengah kalimat.`;
 
-const SUMMARIZE_CHUNK_MEETING_PROMPT = `Anda adalah asisten notulen rapat pemerintah yang profesional.
-Ekstrak poin-poin penting dari bagian transkrip rapat berikut.
+const SUMMARIZE_CHUNK_MEETING_PROMPT = `Tulis semua output dalam Bahasa Indonesia.
+Gunakan hanya karakter ASCII standar. Hindari simbol seperti ≈, →, ×, ±, tanda kutip lengkung, atau em dash — gunakan kata (mis. 'sekitar', 'menjadi') atau tanda ASCII biasa (-, ->, x, +/-) sebagai gantinya.
+Anda adalah asisten yang mengekstrak poin penting dari transkrip audio.
+Transkrip bisa berupa rapat pemerintah, wawancara, podcast, atau diskusi — tangani semua jenis.
+Ekstrak SEMUA poin penting dari bagian transkrip berikut.
 
 ATURAN:
 - Gunakan daftar bernomor (1., 2.) dan sub-list huruf (a., b., c.)
 - Bold (**) untuk nama orang, organisasi, dan istilah teknis
 - PERTAHANKAN nama orang, organisasi/unit, dan detail teknis
+- Untuk podcast/wawancara: sertakan semua topik, argumen, anekdot, dan contoh konkret yang disampaikan narasumber — ini konten bernilai, bukan noise
 - Fokus pada poin UNIK. Gabungkan ide mirip; jangan ulangi
-- SPESIFISITAS: sertakan detail konkret (siapa, apa, contoh nyata)
+- SPESIFISITAS: sertakan detail konkret (siapa berkata apa, contoh nyata, angka)
 - KOREKSI TRANSKRIPSI: perbaiki kesalahan speech-to-text
   mis. "ekspetasi"→"ekspektasi", "infestasi"→"investasi"
 - Hindari kata "juga" di awal atau akhir kalimat
 - Tanpa pembukaan, langsung poin saja
-- Pastikan kalimat terakhir selesai lengkap`;
+- Pastikan kalimat terakhir selesai lengkap
+- Jangan kembalikan teks kosong — selalu ekstrak minimal beberapa poin dari bagian apapun`;
 
 const SUMMARIZE_CHUNK_DOC_PROMPT = `Anda asisten notulen rapat pemerintah yang profesional. Ekstrak poin penting dari bagian transkrip berikut: maksimal 5 poin, tiap poin maksimal 30 kata. Bahasa Indonesia formal. Tanpa kesimpulan atau kalimat penutup.
 
@@ -244,28 +250,28 @@ Format output:
 - [poin penting]
 - [poin penting]`;
 
-const SUMMARIZE_MERGE_PROMPT = `PENTING: Ringkasan Eksekutif dan Insight tambahan MAKSIMAL 40 kata masing-masing. JANGAN lebih.
-
+const SUMMARIZE_MERGE_PROMPT = `Tulis semua output dalam Bahasa Indonesia.
+Gunakan hanya karakter ASCII standar. Hindari simbol seperti ≈, →, ×, ±, tanda kutip lengkung, atau em dash — gunakan kata (mis. 'sekitar', 'menjadi') atau tanda ASCII biasa (-, ->, x, +/-) sebagai gantinya.
+URUTAN: Susun poin Rangkuman secara KRONOLOGIS mengikuti [Bagian 1], [Bagian 2], dst.
+FILTER: Rangkuman MAKSIMAL 12-15 poin. Gabung atau buang poin yang hanya disebut sekilas (1-2 kalimat, tidak dikembangkan). Pertahankan poin yang dibahas mendalam (banyak detail/contoh/argumen). Buang basa-basi, ajakan follow/subscribe, dan komentar meta soal podcast/rapat itu sendiri.
+PENTING: Ringkasan Eksekutif dan Insight tambahan MAKSIMAL 40 kata masing-masing. JANGAN lebih.
 Input di bawah terdiri dari BEBERAPA rangkuman per bagian. Gabungkan menjadi SATU rangkuman final.
-
 Output HANYA:
-- SATU **Ringkasan Eksekutif** (ikhtisar tingkat tinggi, MAKSIMAL 40 kata. JANGAN menyalin kalimat dari Rangkuman—tulis gambaran umum saja.)
-- SATU **Rangkuman** (daftar bernomor 1., 2., 3., ... gabungkan semua poin. Setiap poin harus mengandung detail konkret: nama, angka, contoh nyata. Buang poin yang terlalu generik. Tidak ada batas jumlah—sertakan semua yang penting, tapi jangan tambahkan poin yang tidak bernilai. JANGAN gunakan sub-poin a., b., c.—gabungkan semua detail sebagai kalimat lanjutan dalam paragraf bernomor yang sama.)
-- SATU **Insight tambahan** (MAKSIMAL 40 kata total. Takeaway non-obvious DARI narasumber/penulis—BUKAN nasihat hidup umum. Tulis apa yang disampaikan narasumber, bukan saran generik seperti "hidup lebih bahagia".)
-
-Beri baris kosong antara judul section dan isi. Buang informasi kurang penting—prioritaskan yang esensial saja.
-
+- SATU **Ringkasan Eksekutif** (ikhtisar tingkat tinggi, MAKSIMAL 40 kata. Jangan salin kalimat dari Rangkuman.)
+- SATU **Rangkuman** (daftar bernomor 1., 2., 3., sesuai urutan kronologis dan filter di atas. Setiap poin: detail konkret—nama, angka, contoh. JANGAN gunakan sub-poin a., b., c.—gabungkan sebagai kalimat lanjutan dalam paragraf bernomor sama.)
+- SATU **Insight tambahan** (MAKSIMAL 40 kata total. Takeaway non-obvious DARI narasumber—bukan nasihat umum.)
+Beri baris kosong antara judul section dan isi.
 ATURAN:
-- DEDUPLIKASI: Poin yang sama atau mirip hanya perlu disebut SATU KALI. Gabungkan ide mirip menjadi satu; jangan ulangi di paragraf berbeda.
-- CROSS-SECTION DEDUP: Ringkasan Eksekutif, Rangkuman, dan Insight tambahan TIDAK BOLEH mengandung kalimat atau ide yang sama. Setiap bagian punya peran berbeda.
-- SPESIFISITAS: Buang poin generik yang berlaku untuk konteks apa saja (mis. "beradaptasi itu tantangan"). Pertahankan hanya poin yang mengandung detail spesifik dari sumber.
-- Format RAPAT/NOTULA hanya jika rangkuman per bagian JELAS berisi rapat/pertemuan (peserta, jalannya rapat, diskusi). Gabungkan ke format terstruktur dengan MARKDOWN: **bold** untuk heading dan istilah penting, daftar bernomor (1., 2.) dan sub-list huruf (a., b., c.). Pertahankan nama orang dan detail teknis. Untuk **Kesimpulan**: boleh tambahkan insight Anda sendiri (analisis, rekomendasi, observasi) yang relevan.
-- Jika rangkuman berisi buku/artikel/podcast: Output 3 bagian—**Ringkasan Eksekutif**, **Rangkuman**, **Insight tambahan**. Ringkasan Eksekutif dan Insight tambahan MAKSIMAL 40 kata. Pilih poin paling penting saja; buang sisanya.
-- Hindari kata "juga" di awal atau akhir kalimat. Variasikan kata penghubung dan frasa (selain itu, selanjutnya, menurut penulis, dll.) - jangan gunakan "penulis berpendapat" berulang kali.
-- KOREKSI TRANSKRIPSI: Perbaiki kesalahan umum dari speech-to-text, mis. "ekspetasi" → "ekspektasi", "menafigasi" → "menavigasi", "infestasi" → "investasi".
-- Pastikan rangkuman selesai LENGKAP; jangan potong di tengah kalimat atau paragraf.
-- Tanpa pembukaan lain, langsung rangkuman saja. Output akhir: tepat satu blok **Ringkasan Eksekutif**, satu blok **Rangkuman**, satu blok **Insight tambahan**. Tidak boleh ada pengulangan struktur ini.
-- PENTING FORMAT HEADING: Setiap heading section harus berada di baris TERPISAH, diikuti baris kosong, lalu isinya. JANGAN gabungkan heading dan isi dalam satu baris.`;
+- DEDUPLIKASI: Poin sama/mirip disebut SATU KALI.
+- CROSS-SECTION DEDUP: Ringkasan Eksekutif, Rangkuman, Insight tambahan tidak boleh mengandung ide yang sama.
+- SPESIFISITAS: Buang poin generik yang berlaku untuk konteks apa saja.
+- Format RAPAT/NOTULA hanya jika bagian JELAS berisi rapat (peserta, jalannya rapat, diskusi). Gunakan **bold** heading, daftar bernomor, sub-list huruf a./b./c. Untuk **Kesimpulan**: boleh tambahkan insight sendiri.
+- Jika buku/artikel/podcast: 3 bagian seperti di atas.
+- Hindari kata "juga" di awal/akhir kalimat. Variasikan frasa penghubung.
+- KOREKSI TRANSKRIPSI: perbaiki kesalahan speech-to-text (mis. "ekspetasi"→"ekspektasi").
+- Pastikan rangkuman selesai LENGKAP, tidak terpotong di tengah kalimat.
+- Langsung rangkuman saja, tanpa pembukaan. Output akhir: tepat satu blok tiap section, tidak ada pengulangan struktur.
+- Setiap heading section di baris TERPISAH, diikuti baris kosong, lalu isinya.`;
 
 const MERGE_INTERMEDIATE_PROMPT = `Anda adalah asisten notulen. Tugas Anda adalah mengompres poin-poin berikut menjadi daftar ringkas.
 
@@ -335,7 +341,8 @@ async function mergeSummariesOnce(
   apiKey: string,
   glossary: string | undefined,
   onProgress: MergeProgress | undefined,
-  onBatchComplete?: (batchResults: string[]) => Promise<void>
+  onBatchComplete?: (batchResults: string[]) => Promise<void>,
+  depth: number = 0
 ): Promise<string> {
   const pipeline = SUMMARIZE_PIPELINE_STANDARD;
     const MERGE_PROMPT_OVERHEAD_TOKENS = 500;
@@ -344,6 +351,22 @@ async function mergeSummariesOnce(
 
     const parts = summaries.map((s) => s.trim()).filter(Boolean);
     if (parts.length === 0) return "";
+
+    logger.log(`>>> [MERGE depth=${depth}] Called with ${parts.length} summaries`);
+
+    const MAX_MERGE_DEPTH = 3;
+    if (depth >= MAX_MERGE_DEPTH) {
+      console.warn("[MERGE] Max recursion depth reached, forcing final merge");
+      logger.log(`>>> [MERGE depth=${depth}] Forced final merge (max depth reached)`);
+      onProgress?.(1, 1);
+      const result = await summarizeWithGroq(parts.join("\n\n"), apiKey, {
+        systemPrompt: SUMMARIZE_MERGE_PROMPT,
+        maxTokens: 4000,
+        glossary,
+        pipeline: SUMMARIZE_PIPELINE_STANDARD,
+      });
+      return result;
+    }
 
     const combined = parts
       .map((s, i) => `[Bagian ${i + 1}]\n${s}`)
@@ -355,9 +378,15 @@ async function mergeSummariesOnce(
 
     if (estimatedTokens <= SAFE_TOKEN_LIMIT) {
       onProgress?.(1, 1);
+      try {
+        logger.log("[MERGE INPUT]", combined.length, "chars total");
+      } catch {
+        // ignore debug log failures
+      }
+      logger.log(`>>> [MERGE depth=${depth}] Single merge, estimated ${estimatedTokens} tokens`);
       const result = await summarizeWithGroq(combined, apiKey, {
         systemPrompt: SUMMARIZE_MERGE_PROMPT,
-        maxTokens: 1500,
+        maxTokens: 3000,
         glossary,
         pipeline,
       });
@@ -380,22 +409,27 @@ async function mergeSummariesOnce(
     }
     if (currentBatch.length > 0) batches.push(currentBatch);
 
+    logger.log(`>>> [MERGE depth=${depth}] Too large (${estimatedTokens} tokens), split into ${batches.length} batches`);
+
     const batchResults: string[] = [];
     for (let i = 0; i < batches.length; i++) {
       const batchInput = batches[i]
         .map((s, j) => `[Bagian ${j + 1}]\n${s}`)
         .join("\n\n");
 
+      logger.log(`[MERGE depth=${depth} BATCH ${i + 1}/${batches.length}] Starting, ${batches[i].length} summaries, ${batchInput.length} chars`);
+
       onProgress?.(i + 1, batches.length + 1);
 
       const result = await summarizeWithGroq(batchInput, apiKey, {
         systemPrompt: MERGE_INTERMEDIATE_PROMPT,
-        maxTokens: 350,
+        maxTokens: 1500,
         glossary,
         pipeline,
       });
 
       batchResults.push(result);
+      logger.log(`[MERGE depth=${depth} BATCH ${i + 1}/${batches.length}] Done, result length: ${result.length} chars`);
 
       // Checkpoint after each batch
       if (onBatchComplete) {
@@ -410,7 +444,8 @@ async function mergeSummariesOnce(
     onProgress?.(batches.length + 1, batches.length + 1);
     await sleep(62000);
     // Inner reduce rounds: no onBatchComplete — checkpoints only for outermost merge
-    return mergeSummariesOnce(batchResults, apiKey, glossary, onProgress);
+    logger.log(`>>> [MERGE depth=${depth}] All batches done, recursing to depth=${depth + 1} with ${batchResults.length} results`);
+    return mergeSummariesOnce(batchResults, apiKey, glossary, onProgress, onBatchComplete, depth + 1);
 }
 
 export interface MergeSummariesOptions {
@@ -461,18 +496,31 @@ export function getGroqUserFriendlyError(status: number): string | null {
   return null;
 }
 
-/** Parse "try again in X.XXs" or "try again in Xms" from Groq 429 error. Returns ms to wait, or default. */
+/** Parse "try again in X.XXs", "try again in Xm Y.Zs", or "try again in Xms" from Groq 429 error. Returns ms to wait, or default. */
 export function parseRetryAfterMs(errBody: string, defaultMs: number): number {
   const msMatch = errBody.match(/try again in (\d+)ms/i);
   if (msMatch) {
     return Math.ceil(parseInt(msMatch[1], 10)) + 500;
   }
+  const minSecMatch = errBody.match(/try again in (\d+)m\s*([\d.]+)s/i);
+  if (minSecMatch) {
+    const minutes = parseInt(minSecMatch[1], 10);
+    const seconds = parseFloat(minSecMatch[2]);
+    return Math.ceil((minutes * 60 + seconds) * 1000) + 5000;
+  }
   const secMatch = errBody.match(/try again in ([\d.]+)s/i);
   if (secMatch) {
     const sec = parseFloat(secMatch[1]);
-    return Math.ceil(sec * 1000) + 1000;
+    return Math.ceil(sec * 1000) + 5000;
   }
   return defaultMs;
+}
+
+function formatMsAsDuration(ms: number): string {
+  const totalSeconds = Math.floor(ms / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}m${seconds}s`;
 }
 
 const REFINE_SYSTEM_PROMPT = `Anda adalah asisten perangkum dokumen yang memperbarui rangkuman secara bertahap.
@@ -514,8 +562,29 @@ async function callGroqApi(
         messages,
         max_tokens: maxTokens,
         temperature,
+        ...(model.startsWith("openai/gpt-oss") ? { 
+          include_reasoning: false,
+          reasoning_effort: "low"
+        } : {}),
       }),
     });
+
+    const rawBody = await res.clone().text();
+    try {
+      const parsed = JSON.parse(rawBody);
+      logger.log(
+        "[GROQ]",
+        res.status,
+        "completion_tokens:",
+        parsed?.usage?.completion_tokens,
+        "reasoning_tokens:",
+        parsed?.usage?.completion_tokens_details?.reasoning_tokens,
+        "content_len:",
+        parsed?.choices?.[0]?.message?.content?.length
+      );
+    } catch {
+      logger.log("[GROQ]", res.status, "(parse failed)");
+    }
 
     if (res.ok) {
       const json = (await res.json()) as {
@@ -526,6 +595,9 @@ async function callGroqApi(
     }
 
     const errBody = await res.text();
+    if (res.status === 429) {
+      logger.warn("[429 DETAIL]", errBody, "parsed wait ms:", parseRetryAfterMs(errBody, 60_000), `(${formatMsAsDuration(parseRetryAfterMs(errBody, 60_000))})`);
+    }
     const isRateLimit = res.status === 429;
     const isQuotaLimit = res.status === 412 || res.status === 413;
 
@@ -613,7 +685,7 @@ export async function summarizeWithGroq(
         ? 600
         : options?.isChunk
           ? isAudio
-            ? 500
+            ? 3000
             : 250
           : undefined;
 
@@ -656,6 +728,13 @@ export async function summarizeWithGroq(
   }
 
   const result = await execute();
+  if (options?.isChunk) {
+    try {
+      logger.log("[CHUNK]", result.content.length, "chars:", result.content.slice(0, 80));
+    } catch {
+      // ignore debug log failures
+    }
+  }
   if (options?.returnHeaders === true) {
     return result;
   }

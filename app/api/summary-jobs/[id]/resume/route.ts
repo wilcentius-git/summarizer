@@ -314,7 +314,6 @@ export async function POST(
               transcribeEndMs = Date.now();
             } catch (transcribeErr) {
               if (transcribeErr instanceof TranscribeCancelledError) {
-                controller.close();
                 return;
               }
               throw transcribeErr;
@@ -323,7 +322,6 @@ export async function POST(
             if (!text?.trim()) {
               await updateJob({ status: "failed", errorMessage: "No speech could be transcribed." });
               send({ type: "error", message: "No speech could be transcribed from the audio." });
-              controller.close();
               return;
             }
             text = deduplicateParagraphs(text);
@@ -341,7 +339,6 @@ export async function POST(
           if (!finalText) {
             await updateJob({ status: "failed", errorMessage: "No text to summarize." });
             send({ type: "error", message: "No text to summarize." });
-            controller.close();
             return;
           }
 
@@ -417,7 +414,6 @@ export async function POST(
               summarizeStartMs = Date.now();
               for (let i = startFromChunk; i < chunks.length; i++) {
                 if (await isJobCancelled(jobId)) {
-                  controller.close();
                   return;
                 }
                 const chunk = chunks[i];
@@ -453,7 +449,6 @@ export async function POST(
               summarizeEndMs = Date.now();
 
               if (await isJobCancelled(jobId)) {
-                controller.close();
                 return;
               }
 

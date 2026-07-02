@@ -26,6 +26,7 @@ export async function GET(
         progressPercentage: true,
         processedTranscribeChunks: true,
         totalChunks: true,
+        processedChunks: true,
         errorMessage: true,
         summaryText: true,
         sourceText: true,

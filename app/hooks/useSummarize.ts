@@ -23,7 +23,9 @@ export type SummarizeProgress = {
 type PolledSummaryJob = {
   status: string;
   processedTranscribeChunks?: number;
+  processedChunks?: number;
   totalChunks?: number | null;
+  progressPercentage?: number;
   errorMessage?: string | null;
   summaryText?: string | null;
 };
@@ -39,10 +41,7 @@ function progressFromPolledJob(job: PolledSummaryJob): SummarizeProgress {
       stepLabel: "Transkripsi",
     };
   }
-  if (
-    job.status === "queued_transcription" ||
-    (job.status === "processing" && (job.processedTranscribeChunks ?? 0) === 0)
-  ) {
+  if (job.status === "queued_transcription") {
     return {
       phase: "transcribing",
       current: 0,
@@ -52,7 +51,17 @@ function progressFromPolledJob(job: PolledSummaryJob): SummarizeProgress {
       stepLabel: "Transkripsi",
     };
   }
-  if (job.status === "processing" && (job.processedTranscribeChunks ?? 0) > 0) {
+  if (job.status === "processing" && (job.progressPercentage ?? 0) < 30) {
+    if ((job.processedTranscribeChunks ?? 0) === 0) {
+      return {
+        phase: "transcribing",
+        current: 0,
+        total: 1,
+        message: "Mentranskripsi audio…",
+        step: 1,
+        stepLabel: "Transkripsi",
+      };
+    }
     const total = job.totalChunks ?? 1;
     const current = job.processedTranscribeChunks ?? 0;
     return {
@@ -62,6 +71,38 @@ function progressFromPolledJob(job: PolledSummaryJob): SummarizeProgress {
       message: `Transkripsi bagian ${current} dari ${total}…`,
       step: 1,
       stepLabel: "Transkripsi",
+    };
+  }
+  if (job.status === "processing") {
+    const total = job.totalChunks ?? 0;
+    const current = job.processedChunks ?? 0;
+    if (total > 0 && current < total) {
+      return {
+        phase: "chunks",
+        current,
+        total,
+        message: `Merangkum bagian ${current + 1} dari ${total}…`,
+        step: 2,
+        stepLabel: "Rangkuman",
+      };
+    }
+    if (total > 0 && current >= total) {
+      return {
+        phase: "merge",
+        current: 1,
+        total: 1,
+        message: "Menggabungkan rangkuman…",
+        step: 3,
+        stepLabel: "Finalisasi",
+      };
+    }
+    return {
+      phase: "summarizing",
+      current: 1,
+      total: 1,
+      message: "Merangkum…",
+      step: 2,
+      stepLabel: "Rangkuman",
     };
   }
   return {
@@ -97,6 +138,12 @@ async function pollQueuedTranscriptionJob(
       signal,
     });
     if (!res.ok) {
+      if (res.status === 401) {
+        const loginUrl = new URL("/login", window.location.origin);
+        loginUrl.searchParams.set("from", window.location.pathname);
+        window.location.href = loginUrl.toString();
+        return "terminal";
+      }
       throw new Error(`Failed to poll job: ${res.status}`);
     }
 
@@ -120,6 +167,7 @@ async function pollQueuedTranscriptionJob(
       return "terminal";
     }
 
+    console.log("[POLL]", job.status, job.progressPercentage, job.totalChunks, job.processedChunks);
     options.setSummarizeProgress(progressFromPolledJob(job));
     return "continue";
   };

@@ -30,7 +30,7 @@ import {
   resolveAudioMimeType,
 } from "@/lib/transcribe-audio";
 import { deleteAudio, saveAudio } from "@/lib/audio-storage";
-import { decryptApiKey } from "@/lib/crypto";
+import { decryptApiKey, encryptApiKey } from "@/lib/crypto";
 import { resolveGroqApiKey } from "@/lib/resolve-groq-api-key";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { writeAuditLog } from "@/lib/audit-log";
@@ -215,6 +215,7 @@ export async function POST(request: NextRequest) {
         processedTranscribeChunks?: number;
         partialTranscript?: string | null;
         audioPath?: string;
+        personalGroqApiKey?: string;
         totalDurationMs?: number;
         transcribeDurationMs?: number;
         summarizeDurationMs?: number;
@@ -259,10 +260,16 @@ export async function POST(request: NextRequest) {
         let audioPathToCleanup: string | null = null;
         if (isAudio) {
           const savedPath = await saveAudio(job.id, fileName, buffer);
+          const rawPersonalGroqKey = (
+            formData.get("groqApiKey") as string | null | undefined
+          )?.trim();
           await updateJob({
             status: "queued_transcription",
             progressPercentage: 15,
             audioPath: savedPath,
+            ...(rawPersonalGroqKey
+              ? { personalGroqApiKey: encryptApiKey(rawPersonalGroqKey) }
+              : {}),
           });
           send({
             type: "queued",

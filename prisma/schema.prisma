@@ -8,63 +8,62 @@ datasource db {
 }
 
 model User {
-  /** NIP from Simpeg (same value as JWT `userId`). */
-  id           String       @id
-  /** Kept for API responses; same as `id` (NIP). */
-  email        String       @unique
-  /** Display name from Simpeg (or admin); shown in UI instead of NIP when set. */
+  /// * NIP from Simpeg (same value as JWT `userId`).
+  id           String               @id
+  /// * Kept for API responses; same as `id` (NIP).
+  email        String               @unique
+  /// * Display name from Simpeg (or admin); shown in UI instead of NIP when set.
   name         String?
-  passwordHash String       @map("password_hash")
-  createdAt    DateTime     @default(now()) @map("created_at")
-  isAdmin      Boolean      @default(false) @map("is_admin")
-  summaryJobs  SummaryJob[]
+  passwordHash String               @map("password_hash")
+  createdAt    DateTime             @default(now()) @map("created_at")
+  isAdmin      Boolean              @default(false) @map("is_admin")
   editHistory  SummaryEditHistory[]
+  summaryJobs  SummaryJob[]
 }
 
 model SummaryJob {
-  id                        String    @id @default(cuid())
-  userId                    String    @map("user_id")
+  id                        String               @id @default(cuid())
+  userId                    String               @map("user_id")
   filename                  String
-  fileType                  String    @map("file_type") // mp3 | pdf | docx
-  uploadTime                DateTime  @default(now()) @map("upload_time")
-  status                    String    @default("pending") // pending | processing | waiting_rate_limit | completed | failed | cancelled
-  summaryText               String?   @map("summary_text")              @db.Text
-  /** Full extracted / transcribed text kept for display after job completes. */
-  sourceText                String?   @map("source_text")               @db.Text
-  progressPercentage        Int       @default(0) @map("progress_percentage")
-  totalChunks               Int?      @map("total_chunks")
-  processedChunks           Int       @default(0) @map("processed_chunks")
-  partialSummary            String?   @map("partial_summary")           @db.Text
-  groqAttempts              Int       @default(0) @map("groq_attempts")
-  errorMessage              String?   @map("error_message")             @db.Text
-  retryAfter                DateTime? @map("retry_after")
-  extractedTextForRetry     String?   @map("extracted_text_for_retry") @db.Text
-  jobRetryContext           String?   @map("job_retry_context")         @db.Text // JSON: { isAudio?, summarizeChunkSize? }
-  processedTranscribeChunks Int       @default(0) @map("processed_transcribe_chunks")
-  partialTranscript         String?   @map("partial_transcript")        @db.Text // JSON array of transcript chunks
-  audioPath                 String?   @map("audio_path") // Path to stored audio for resume-from-transcription
-  totalDurationMs           Int?      @map("total_duration_ms")
-  transcribeDurationMs      Int?      @map("transcribe_duration_ms")
-  summarizeDurationMs       Int?      @map("summarize_duration_ms")
-  mergeDurationMs           Int?      @map("merge_duration_ms")
-  completedAt               DateTime? @map("completed_at")
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-  editHistory SummaryEditHistory[]
+  fileType                  String               @map("file_type")
+  uploadTime                DateTime             @default(now()) @map("upload_time")
+  status                    String               @default("pending")
+  summaryText               String?              @map("summary_text")
+  /// * Full extracted / transcribed text kept for display after job completes.
+  sourceText                String?              @map("source_text")
+  progressPercentage        Int                  @default(0) @map("progress_percentage")
+  totalChunks               Int?                 @map("total_chunks")
+  processedChunks           Int                  @default(0) @map("processed_chunks")
+  partialSummary            String?              @map("partial_summary")
+  groqAttempts              Int                  @default(0) @map("groq_attempts")
+  errorMessage              String?              @map("error_message")
+  retryAfter                DateTime?            @map("retry_after")
+  extractedTextForRetry     String?              @map("extracted_text_for_retry")
+  jobRetryContext           String?              @map("job_retry_context")
+  processedTranscribeChunks Int                  @default(0) @map("processed_transcribe_chunks")
+  partialTranscript         String?              @map("partial_transcript")
+  audioPath                 String?              @map("audio_path")
+  totalDurationMs           Int?                 @map("total_duration_ms")
+  transcribeDurationMs      Int?                 @map("transcribe_duration_ms")
+  summarizeDurationMs       Int?                 @map("summarize_duration_ms")
+  mergeDurationMs           Int?                 @map("merge_duration_ms")
+  completedAt               DateTime?            @map("completed_at")
+  personalGroqApiKey        String?              @map("personal_groq_api_key")
+  editHistory               SummaryEditHistory[]
+  user                      User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("summary_jobs")
 }
 
 model SummaryEditHistory {
-  id          String   @id @default(cuid())
-  jobId       String   @map("job_id")
-  editedById  String   @map("edited_by_id")
-  editedAt    DateTime @default(now()) @map("edited_at")
-  textBefore  String   @map("text_before") @db.Text
-  textAfter   String   @map("text_after") @db.Text
-
-  job      SummaryJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
-  editedBy User       @relation(fields: [editedById], references: [id], onDelete: Cascade)
+  id         String     @id @default(cuid())
+  jobId      String     @map("job_id")
+  editedById String     @map("edited_by_id")
+  editedAt   DateTime   @default(now()) @map("edited_at")
+  textBefore String     @map("text_before")
+  textAfter  String     @map("text_after")
+  editedBy   User       @relation(fields: [editedById], references: [id], onDelete: Cascade)
+  job        SummaryJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
 
   @@index([jobId])
   @@index([editedById])
@@ -82,26 +81,26 @@ model ApiKey {
 model SatuanKerja {
   id         String      @id @default(cuid())
   name       String      @unique
-  groqApiKey String?     @map("groq_api_key")
   createdAt  DateTime    @default(now()) @map("created_at")
+  groqApiKey String?     @map("groq_api_key")
   whitelists Whitelist[]
 
   @@map("satuan_kerja")
 }
 
 model Whitelist {
-  nip            String       @id
-  createdAt      DateTime     @default(now()) @map("created_at")
-  satuanKerjaId  String?      @map("satuan_kerja_id")
-  satuanKerja    SatuanKerja? @relation(fields: [satuanKerjaId], references: [id])
+  nip           String       @id
+  createdAt     DateTime     @default(now()) @map("created_at")
+  satuanKerjaId String?      @map("satuan_kerja_id")
+  satuanKerja   SatuanKerja? @relation(fields: [satuanKerjaId], references: [id])
 
   @@map("whitelist")
 }
 
 model AuditLog {
   id        String   @id @default(cuid())
-  type      String   // JOB | AUTH | ADMIN | ERROR
-  action    String   // e.g. "job.completed", "auth.login", "admin.whitelist.add"
+  type      String
+  action    String
   userId    String?
   metadata  Json?
   createdAt DateTime @default(now())

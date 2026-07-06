@@ -14,6 +14,7 @@ dotenv.config({ path: ".env.local" });
 import { Prisma } from "@prisma/client";
 import { prisma } from "../lib/prisma";
 import { decryptApiKey } from "../lib/crypto";
+import { deleteAudio } from "@/lib/audio-storage";
 import { processRateLimitedJob } from "../lib/retry-summarize";
 import { processTranscriptionJob } from "../lib/transcribe-job";
 import { resolveGroqApiKey } from "../lib/resolve-groq-api-key";
@@ -28,7 +29,10 @@ function isPrismaRecordNotFound(err: unknown): boolean {
   );
 }
 
-async function resolveGroqApiKeyForJob(userId: string): Promise<string> {
+async function resolveGroqApiKeyForJob(
+  userId: string,
+  personalGroqApiKey?: string | null
+): Promise<string> {
   let satuanKerjaGroqKey: string | null = null;
   try {
     const entry = await prisma.whitelist.findUnique({
@@ -42,7 +46,15 @@ async function resolveGroqApiKeyForJob(userId: string): Promise<string> {
   } catch {
     // fall through to env via resolveGroqApiKey
   }
-  return resolveGroqApiKey(null, satuanKerjaGroqKey);
+  let personalKey: string | null = null;
+  if (personalGroqApiKey) {
+    try {
+      personalKey = decryptApiKey(personalGroqApiKey);
+    } catch {
+      // fall through to satuan kerja / env if decryption fails
+    }
+  }
+  return resolveGroqApiKey(personalKey, satuanKerjaGroqKey);
 }
 
 async function processQueuedTranscriptionJobs() {
@@ -57,7 +69,7 @@ async function processQueuedTranscriptionJobs() {
 
   for (const job of jobs) {
     try {
-      const apiKey = await resolveGroqApiKeyForJob(job.userId);
+      const apiKey = await resolveGroqApiKeyForJob(job.userId, job.personalGroqApiKey);
       if (!apiKey) {
         logger.warn(
           `[worker] No Groq API key for job ${job.id} (user ${job.userId}). Skipping.`
@@ -97,8 +109,13 @@ async function processQueuedTranscriptionJobs() {
               retryAfter: null,
               extractedTextForRetry: null,
               jobRetryContext: null,
+              audioPath: null,
+              personalGroqApiKey: null,
             },
           });
+          if (job.audioPath) {
+            deleteAudio(job.audioPath);
+          }
           logger.log(`[worker] Job ${job.id} (${job.filename}) completed.`);
         } catch (guardErr) {
           if (isPrismaRecordNotFound(guardErr)) {
@@ -151,6 +168,7 @@ async function processQueuedTranscriptionJobs() {
             data: {
               status: "failed",
               errorMessage: result.error,
+              personalGroqApiKey: null,
             },
           });
           console.error(`[worker] Job ${job.id} failed: ${result.error}`);
@@ -178,6 +196,7 @@ async function processQueuedTranscriptionJobs() {
           data: {
             status: "failed",
             errorMessage: err instanceof Error ? err.message : "Worker error",
+            personalGroqApiKey: null,
           },
         });
       } catch (guardErr) {
@@ -205,7 +224,7 @@ async function processWaitingRateLimitJobs() {
 
   for (const job of jobs) {
         try {
-          const apiKey = await resolveGroqApiKeyForJob(job.userId);
+          const apiKey = await resolveGroqApiKeyForJob(job.userId, job.personalGroqApiKey);
           if (!apiKey) {
             logger.warn(
               `[worker] No Groq API key for job ${job.id} (user ${job.userId}). Skipping.`
@@ -245,8 +264,13 @@ async function processWaitingRateLimitJobs() {
                   retryAfter: null,
                   extractedTextForRetry: null,
                   jobRetryContext: null,
+                  audioPath: null,
+                  personalGroqApiKey: null,
                 },
               });
+              if (job.audioPath) {
+                deleteAudio(job.audioPath);
+              }
               logger.log(`[worker] Job ${job.id} (${job.filename}) completed.`);
             } catch (guardErr) {
               if (isPrismaRecordNotFound(guardErr)) {
@@ -300,6 +324,7 @@ async function processWaitingRateLimitJobs() {
                     retryAfter: null,
                     extractedTextForRetry: null,
                     jobRetryContext: null,
+                    personalGroqApiKey: null,
                   },
                 });
                 console.error(`[worker] Job ${job.id} failed: ${result.error}`);
@@ -328,6 +353,7 @@ async function processWaitingRateLimitJobs() {
               data: {
                 status: "failed",
                 errorMessage: err instanceof Error ? err.message : "Worker error",
+                personalGroqApiKey: null,
               },
             });
           } catch (guardErr) {

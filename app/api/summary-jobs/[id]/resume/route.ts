@@ -1,33 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 
-import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import * as fs from "fs";
 import { verifyToken } from "@/lib/auth";
-import {
-  deduplicateParagraphs,
-  isGroqRateLimitError,
-  mergeSummaries,
-  sleepChunkPacingFromGroqHeaders,
-  splitIntoChunks,
-  summarizeWithGroq,
-  SUMMARIZE_PIPELINE_STANDARD,
-  type SummarizePipelineConfig,
-} from "@/lib/groq";
-import { isJobCancelled } from "@/lib/check-cancelled";
-import {
-  TranscribeCancelledError,
-  transcribeWithGroq,
-} from "@/lib/transcribe-audio";
-import { audioExists, deleteAudio } from "@/lib/audio-storage";
-import { truncateSummarySections } from "@/lib/summary-format";
-import { decryptApiKey } from "@/lib/crypto";
+import { audioExists } from "@/lib/audio-storage";
+import { decryptApiKey, encryptApiKey } from "@/lib/crypto";
 import { resolveGroqApiKey } from "@/lib/resolve-groq-api-key";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { jobVisibilityWhere } from "@/lib/job-visibility";
 import { writeAuditLog } from "@/lib/audit-log";
-import { logger } from "@/lib/logger";
 
 /** Job with fields needed for resume (Prisma client may be out of sync with schema). */
 type ResumableJob = {
@@ -44,14 +25,6 @@ type ResumableJob = {
   processedTranscribeChunks?: number;
   audioPath?: string | null;
 };
-
-/** Allow long-running summarization. */
-export const maxDuration = 7200;
-
-function sendStreamLine(controller: ReadableStreamDefaultController<Uint8Array>, obj: object) {
-  const encoder = new TextEncoder();
-  controller.enqueue(encoder.encode(JSON.stringify(obj) + "\n"));
-}
 
 export async function POST(
   request: NextRequest,
@@ -115,17 +88,6 @@ export async function POST(
       );
     }
 
-    let context: { isAudio?: boolean } = {};
-    try {
-      if (resumableJob.jobRetryContext) {
-        context = JSON.parse(resumableJob.jobRetryContext) as {
-          isAudio?: boolean;
-        };
-      }
-    } catch {
-      return NextResponse.json({ error: "Invalid job retry context." }, { status: 400 });
-    }
-
     let satuanKerjaGroqKey: string | null = null;
     const whitelistEntry = await prisma.whitelist.findUnique({
       where: { nip: payload.userId },
@@ -158,13 +120,22 @@ export async function POST(
       "cancelled",
     ] as const;
 
+    const rawPersonalGroqKey = (body.groqApiKey as string | null | undefined)?.trim();
+
+    const targetStatus =
+      !text?.trim() && hasTranscriptionResume ? "queued_transcription" : "waiting_rate_limit";
+
     const claimResult = await prisma.summaryJob.updateMany({
       where: {
         id: jobId,
         ...visibility,
         status: { in: [...resumableStatuses] },
       },
-      data: { status: "processing" },
+      data: {
+        status: targetStatus,
+        ...(targetStatus === "waiting_rate_limit" ? { retryAfter: new Date() } : {}),
+        ...(rawPersonalGroqKey ? { personalGroqApiKey: encryptApiKey(rawPersonalGroqKey) } : {}),
+      },
     });
 
     if (claimResult.count === 0) {
@@ -199,384 +170,10 @@ export async function POST(
       metadata: { jobId },
     });
 
-    const stream = new ReadableStream({
-      async start(controller) {
-        const pipelineJobStart = Date.now();
-        let transcribeStartMs: number | undefined;
-        let transcribeEndMs: number | undefined;
-        let summarizeStartMs: number | undefined;
-        let summarizeEndMs: number | undefined;
-        let mergeStartMs: number | undefined;
-        let mergeEndMs: number | undefined;
-
-        const send = (obj: object) => {
-          try {
-            sendStreamLine(controller, obj);
-          } catch {
-            // Client may have disconnected
-          }
-        };
-
-        const updateJob = async (
-          updates: Prisma.SummaryJobUpdateInput & {
-            processedChunks?: number;
-            partialSummary?: string | null;
-            processedTranscribeChunks?: number;
-            partialTranscript?: string | null;
-            audioPath?: string | null;
-            totalDurationMs?: number;
-            transcribeDurationMs?: number;
-            summarizeDurationMs?: number;
-            mergeDurationMs?: number;
-            completedAt?: Date;
-          }
-        ) => {
-          try {
-            const result = await prisma.summaryJob.updateMany({
-              where: { id: jobId },
-              data: updates as Record<string, unknown>,
-            });
-            if (result.count === 0) {
-              logger.warn(
-                "SummaryJob resume update skipped: no row for id (job may have been deleted).",
-                jobId
-              );
-            }
-          } catch (e) {
-            console.error("SummaryJob resume update failed:", e);
-          }
-        };
-
-        const pipeline: SummarizePipelineConfig = SUMMARIZE_PIPELINE_STANDARD;
-        const isAudioJob = context.isAudio === true || resumableJob.fileType === "mp3";
-        const glossary = String((body as { glossary?: string }).glossary ?? "").trim();
-
-        try {
-          // Status already set to processing by atomic claim before the stream starts.
-          let completedTranscriptionThisRun = false;
-
-          // Resume from transcription if we have audio but no extracted text yet
-          if (!text?.trim() && hasTranscriptionResume && resumableJob.audioPath) {
-            let initialTranscripts: string[] = [];
-            try {
-              if (resumableJob.partialTranscript) {
-                initialTranscripts = JSON.parse(resumableJob.partialTranscript) as string[];
-              }
-            } catch {
-              initialTranscripts = resumableJob.partialTranscript ? [resumableJob.partialTranscript] : [];
-            }
-            const startFromChunk = resumableJob.processedTranscribeChunks ?? 0;
-            const buffer = fs.readFileSync(resumableJob.audioPath);
-
-            send({
-              type: "progress",
-              phase: "transcribing",
-              current: startFromChunk,
-              total: 0,
-              message: `Melanjutkan transkripsi dari bagian ${startFromChunk + 1}…`,
-              step: 1,
-              stepLabel: "Transkripsi",
-            });
-
-            try {
-              transcribeStartMs = Date.now();
-              text = await transcribeWithGroq(buffer, apiKey, {
-                fileName: resumableJob.filename,
-                prompt: [
-                  "Transkrip audio berikut. Jangan tambahkan teks yang tidak ada dalam audio. Jangan ulangi kata atau frasa. Jangan tambahkan 'Terima kasih' atau kalimat penutup yang tidak ada dalam audio.",
-                  glossary || "",
-                ].filter(Boolean).join(" "),
-                startFromChunk,
-                initialTranscripts,
-                chunkDelayMs: pipeline.transcribeChunkDelayMs,
-                isCancelled: () => isJobCancelled(jobId),
-                onChunkProgress: (current, total) => {
-                  send({
-                    type: "progress",
-                    phase: "transcribing",
-                    current,
-                    total,
-                    message:
-                      total > 1
-                        ? `Transkripsi bagian ${current} dari ${total}…`
-                        : "Mengirim ke Groq Whisper untuk transkripsi…",
-                    step: 1,
-                    stepLabel: "Transkripsi",
-                  });
-                },
-                onChunkDone: async (chunkIndex, _t, transcriptsSoFar) => {
-                  await updateJob({
-                    processedTranscribeChunks: chunkIndex,
-                    partialTranscript: JSON.stringify(transcriptsSoFar),
-                  });
-                },
-              });
-              transcribeEndMs = Date.now();
-            } catch (transcribeErr) {
-              if (transcribeErr instanceof TranscribeCancelledError) {
-                return;
-              }
-              throw transcribeErr;
-            }
-
-            if (!text?.trim()) {
-              await updateJob({ status: "failed", errorMessage: "No speech could be transcribed." });
-              send({ type: "error", message: "No speech could be transcribed from the audio." });
-              return;
-            }
-            text = deduplicateParagraphs(text);
-            await updateJob({
-              extractedTextForRetry: text,
-              jobRetryContext: JSON.stringify({
-                isAudio: true,
-                summarizeChunkSize: pipeline.summarizeChunkSize,
-              }),
-            });
-            completedTranscriptionThisRun = true;
-          }
-
-          const finalText = text!.trim();
-          if (!finalText) {
-            await updateJob({ status: "failed", errorMessage: "No text to summarize." });
-            send({ type: "error", message: "No text to summarize." });
-            return;
-          }
-
-          send({ type: "sourceText", text: finalText });
-
-          if (!isAudioJob && finalText.length <= pipeline.summarizeChunkSize) {
-              send({
-                type: "progress",
-                phase: "summarizing",
-                current: 1,
-                total: 1,
-                message: isAudioJob ? "Transkrip selesai. Merangkum…" : "Merangkum dokumen…",
-                step: isAudioJob ? 2 : 1,
-                stepLabel: "Rangkuman",
-              });
-              summarizeStartMs = Date.now();
-              const summary = await summarizeWithGroq(finalText, apiKey);
-              summarizeEndMs = Date.now();
-              let finalSummary = deduplicateParagraphs(summary || "Rangkuman tidak dapat dibuat.");
-              finalSummary = truncateSummarySections(finalSummary, 40);
-              await updateJob({
-                status: "completed",
-                partialSummary: null, // clear merge checkpoint
-                progressPercentage: 100,
-                summaryText: finalSummary,
-                sourceText: finalText,
-                errorMessage: null,
-                retryAfter: null,
-                extractedTextForRetry: null,
-                jobRetryContext: null,
-                audioPath: null,
-                partialTranscript: null,
-                processedTranscribeChunks: 0,
-                // Timing fields
-                totalDurationMs: Date.now() - pipelineJobStart,
-                transcribeDurationMs: transcribeEndMs && transcribeStartMs
-                  ? transcribeEndMs - transcribeStartMs
-                  : undefined,
-                summarizeDurationMs: summarizeEndMs && summarizeStartMs
-                  ? summarizeEndMs - summarizeStartMs
-                  : undefined,
-                mergeDurationMs: mergeEndMs && mergeStartMs
-                  ? mergeEndMs - mergeStartMs
-                  : undefined,
-                completedAt: new Date(),
-              });
-              if (resumableJob.audioPath) deleteAudio(resumableJob.audioPath);
-              send({ type: "summary", text: finalSummary });
-            } else {
-              let initialSummaries: string[] = [];
-              if (resumableJob.partialSummary) {
-                try {
-                  initialSummaries = JSON.parse(resumableJob.partialSummary) as string[];
-                } catch {
-                  initialSummaries = resumableJob.partialSummary ? [resumableJob.partialSummary] : [];
-                }
-              }
-              const startFromChunk = resumableJob.processedChunks ?? 0;
-              const chunks = splitIntoChunks(finalText, pipeline.summarizeChunkSize);
-              const total = chunks.length;
-
-              send({
-                type: "progress",
-                phase: "chunks",
-                current: startFromChunk,
-                total,
-                message: `Melanjutkan dari bagian ${startFromChunk + 1}…`,
-                step: isAudioJob ? 2 : 1,
-                stepLabel: "Rangkuman",
-              });
-
-              const accumulatedSummaries = [...initialSummaries];
-              summarizeStartMs = Date.now();
-              for (let i = startFromChunk; i < chunks.length; i++) {
-                if (await isJobCancelled(jobId)) {
-                  return;
-                }
-                const chunk = chunks[i];
-
-                const { content: part, headers: responseHeaders } = await summarizeWithGroq(
-                  chunk,
-                  apiKey,
-                  {
-                    isChunk: true,
-                    isAudio: context.isAudio === true,
-                    returnHeaders: true,
-                  }
-                );
-                accumulatedSummaries.push(part);
-                await updateJob({
-                  processedChunks: i + 1,
-                  partialSummary: JSON.stringify(accumulatedSummaries),
-                });
-                send({
-                  type: "progress",
-                  phase: "chunks",
-                  current: i + 1,
-                  total,
-                  message: `Bagian ${i + 1} dari ${total} selesai`,
-                  step: isAudioJob ? 2 : 1,
-                  stepLabel: "Rangkuman",
-                });
-                if (i < chunks.length - 1) {
-                  await sleepChunkPacingFromGroqHeaders(responseHeaders, i, total);
-                }
-              }
-
-              summarizeEndMs = Date.now();
-
-              if (await isJobCancelled(jobId)) {
-                return;
-              }
-
-              // Check if merge was interrupted mid-way
-              let mergeStartSummaries = accumulatedSummaries; // default: all chunk summaries
-
-              if (resumableJob.partialSummary) {
-                try {
-                  const parsed = JSON.parse(resumableJob.partialSummary) as {
-                    type?: string;
-                    totalChunks?: number;
-                    batchResults?: string[];
-                  };
-                  if (
-                    parsed?.type === "merge_checkpoint" &&
-                    parsed?.totalChunks === accumulatedSummaries.length &&
-                    Array.isArray(parsed?.batchResults) &&
-                    parsed.batchResults.length > 0
-                  ) {
-                    // Merge was interrupted — resume from saved batch results
-                    mergeStartSummaries = parsed.batchResults;
-                  }
-                } catch {
-                  // Not a merge checkpoint — use full chunk summaries
-                }
-              }
-
-              send({
-                type: "progress",
-                phase: "merge",
-                current: 0,
-                total: 1,
-                message: "Mempersiapkan penggabungan…",
-                step: isAudioJob ? 2 : 1,
-                stepLabel: "Gabung",
-              });
-              mergeStartMs = Date.now();
-              const summary = await mergeSummaries(mergeStartSummaries, apiKey, {
-                onProgress: (cur, tot) => {
-                  send({
-                    type: "progress",
-                    phase: "merge",
-                    current: cur,
-                    total: tot,
-                    message:
-                      tot > 1
-                        ? `Menggabungkan bagian ${cur} dari ${tot}…`
-                        : "Menggabungkan rangkuman…",
-                    step: isAudioJob ? 2 : 1,
-                    stepLabel: "Gabung",
-                  });
-                },
-                onBatchComplete: async (batchResults) => {
-                  await updateJob({
-                    partialSummary: JSON.stringify({
-                      type: "merge_checkpoint",
-                      totalChunks: accumulatedSummaries.length,
-                      batchResults,
-                    }),
-                  });
-                },
-              });
-              mergeEndMs = Date.now();
-              let finalSummary = deduplicateParagraphs(summary || "Rangkuman tidak dapat dibuat.");
-              finalSummary = truncateSummarySections(finalSummary, 40);
-              await updateJob({
-                status: "completed",
-                partialSummary: null, // clear merge checkpoint
-                progressPercentage: 100,
-                summaryText: finalSummary,
-                sourceText: finalText,
-                errorMessage: null,
-                retryAfter: null,
-                extractedTextForRetry: null,
-                jobRetryContext: null,
-                audioPath: null,
-                partialTranscript: null,
-                processedTranscribeChunks: 0,
-                // Timing fields
-                totalDurationMs: Date.now() - pipelineJobStart,
-                transcribeDurationMs: transcribeEndMs && transcribeStartMs
-                  ? transcribeEndMs - transcribeStartMs
-                  : undefined,
-                summarizeDurationMs: summarizeEndMs && summarizeStartMs
-                  ? summarizeEndMs - summarizeStartMs
-                  : undefined,
-                mergeDurationMs: mergeEndMs && mergeStartMs
-                  ? mergeEndMs - mergeStartMs
-                  : undefined,
-                completedAt: new Date(),
-              });
-              if (resumableJob.audioPath) deleteAudio(resumableJob.audioPath);
-              send({ type: "summary", text: finalSummary });
-            }
-        } catch (err) {
-          console.error("[api/summary-jobs/resume] error:", err);
-          if (isGroqRateLimitError(err)) {
-            const retryAfterMs = Math.max(err.retryAfterMs, 60 * 60 * 1000);
-            const retryAfter = new Date(Date.now() + retryAfterMs);
-            await updateJob({
-              status: "waiting_rate_limit",
-              retryAfter,
-              errorMessage: null,
-            });
-            send({
-              type: "waiting_rate_limit",
-              message:
-                "Groq rate limit reached. Job will retry automatically in about 1 hour.",
-              retryAfter: retryAfter.toISOString(),
-            });
-            return;
-          }
-          const userMessage = "Terjadi kesalahan. Silakan coba lagi.";
-          await updateJob({ status: "failed", errorMessage: userMessage });
-          send({ type: "error", message: userMessage });
-        } finally {
-          controller.close();
-        }
-      },
-    });
-
-    return new Response(stream, {
-      headers: {
-        "Content-Type": "application/x-ndjson",
-        "Cache-Control": "no-cache",
-        Connection: "keep-alive",
-      },
-    });
+    return NextResponse.json(
+      { message: "Job resumed, processing in background.", jobId, queued: true },
+      { status: 200 }
+    );
   } catch (err) {
     console.error("Resume route error:", err);
     return NextResponse.json(

@@ -534,19 +534,7 @@ export function useSummarize(
           credentials: "include",
         });
 
-        if (res.ok) {
-          const contentType = res.headers.get("content-type") ?? "";
-          if (contentType.includes("application/json") && !contentType.includes("ndjson")) {
-            const data = (await res.json()) as { message?: string };
-            if (data.message) {
-              setSuccess(data.message);
-              fetchHistory();
-              return;
-            }
-          }
-        }
-
-        if (!res.ok || !res.body) {
+        if (!res.ok) {
           const text = await res.text();
           let errMsg = `Resume failed: ${res.status}`;
           try {
@@ -558,67 +546,25 @@ export function useSummarize(
           throw new Error(errMsg);
         }
 
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = "";
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split("\n");
-          buffer = lines.pop() ?? "";
-
-          for (const line of lines) {
-            if (!line.trim()) continue;
-            try {
-              const data = JSON.parse(line) as {
-                type?: string;
-                step?: number;
-                stepLabel?: string;
-                phase?: string;
-                current?: number;
-                total?: number;
-                message?: string;
-                text?: string;
-                mergeRound?: number;
-              };
-              if (data.type === "progress") {
-                const msg =
-                  data.message ??
-                  (data.phase === "chunks" && data.total != null
-                    ? `Bagian ${data.current ?? 0} dari ${data.total}`
-                    : data.phase === "merge"
-                      ? "Menggabungkan rangkuman…"
-                      : "Memproses…");
-                setResumeProgress({
-                  message: msg,
-                  mergeRound: data.mergeRound,
-                  phase: data.phase ?? "processing",
-                  current: data.current ?? 0,
-                  total: data.total ?? 0,
-                  step: data.step,
-                  stepLabel: data.stepLabel,
-                });
-              } else if (data.type === "summary") {
-                void fetchHistory().then(() => {
-                  onSuccessfulCompletion?.();
-                });
-              } else if (data.type === "waiting_rate_limit") {
-                fetchHistory();
-                setError(null);
-                setResumeLoading(null);
-                setResumeProgress(null);
-                return;
-              } else if (data.type === "error") {
-                throw new Error(data.message ?? "Resume failed.");
-              }
-            } catch (parseErr) {
-              if (parseErr instanceof SyntaxError) continue;
-              throw parseErr;
-            }
-          }
+        const data = await res.json().catch(() => ({} as { message?: string; queued?: boolean }));
+        if (data.message && !data.queued) {
+          setSuccess(data.message);
+          fetchHistory();
+          return;
         }
+
+        stopPolling();
+        await pollQueuedTranscriptionJob(job.id, controller.signal, {
+          setSummarizeProgress: setResumeProgress,
+          setError,
+          fetchHistory,
+          onSuccessfulCompletion,
+          stopPolling,
+          setPollInterval: (id) => {
+            pollIntervalRef.current = id;
+          },
+          isSessionActive: () => true,
+        });
       } catch (err) {
         handleStreamError(err, isPausingRef.current, setError, "Resume failed.");
       } finally {
@@ -629,7 +575,7 @@ export function useSummarize(
         fetchHistory();
       }
     },
-    [groqApiKey, fetchHistory, setError, setSuccess, onSuccessfulCompletion]
+    [groqApiKey, fetchHistory, setError, setSuccess, onSuccessfulCompletion, stopPolling]
   );
 
   return {

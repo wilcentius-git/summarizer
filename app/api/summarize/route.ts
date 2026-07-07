@@ -390,8 +390,6 @@ export async function POST(request: NextRequest) {
               `>>> [TIMING] Summarization done in ${summarizeEndMs - summarizeStartMs!}ms`
             );
 
-            console.log("CHUNK SUMMARIES:", JSON.stringify(chunkSummaries, null, 2));
-
             if (await isJobCancelled(job.id)) {
               controller.close();
               return;

@@ -167,7 +167,6 @@ async function pollQueuedTranscriptionJob(
       return "terminal";
     }
 
-    console.log("[POLL]", job.status, job.progressPercentage, job.totalChunks, job.processedChunks);
     options.setSummarizeProgress(progressFromPolledJob(job));
     return "continue";
   };

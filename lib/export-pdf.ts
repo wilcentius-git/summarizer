@@ -237,8 +237,6 @@ export async function buildJobPdf(
   doc.addFileToVFS("NotoSans-Bold.ttf", boldBase64);
   doc.addFont("NotoSans-Bold.ttf", "NotoSans", "bold");
 
-  console.log("registered fonts:", JSON.stringify(doc.getFontList()));
-
   doc.setFont("NotoSans", "normal");
 
   const margin = 20;

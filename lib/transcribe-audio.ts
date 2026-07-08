@@ -4,9 +4,35 @@
  * Long audio is chunked to avoid 524 timeout; retries on 524 and 429 (rate limit).
  */
 
-import { chunkAudioBuffer } from "@/lib/audio-chunking";
+import { chunkAudioBuffer, type AudioChunk } from "@/lib/audio-chunking";
 import { sleep } from "@/lib/groq";
 import { logger } from "@/lib/logger";
+
+const TRANSCRIPT_PREVIEW_CHARS = 300;
+/** Below this length, a Whisper chunk is flagged as likely silence/dead air. */
+const NEAR_EMPTY_WHISPER_CHARS = 50;
+
+function formatAudioTimestamp(sec: number): string {
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return `${m}:${s.toFixed(1).padStart(4, "0")}`;
+}
+
+function formatChunkTimeRange(chunk: AudioChunk): string {
+  if (chunk.endSec <= 0 && chunk.startSec <= 0) {
+    return "timestamps unknown";
+  }
+  return `${formatAudioTimestamp(chunk.startSec)}–${formatAudioTimestamp(chunk.endSec)}`;
+}
+
+/** Dev-only log after join + deduplication of the full transcript. */
+export function logDeduplicatedTranscript(text: string): void {
+  logger.log(`>>> [TRANSCRIPT] Final joined transcript: ${text.length} chars`);
+  const preview = text.slice(0, TRANSCRIPT_PREVIEW_CHARS);
+  logger.log(
+    `>>> [TRANSCRIPT] Preview: ${preview}${text.length > TRANSCRIPT_PREVIEW_CHARS ? "..." : ""}`
+  );
+}
 
 export const GROQ_TRANSCRIPTION_URL =
   "https://api.groq.com/openai/v1/audio/transcriptions";
@@ -232,7 +258,7 @@ export async function transcribeWithGroq(
   const startFrom = options?.startFromChunk ?? 0;
   const initialTranscripts = options?.initialTranscripts ?? [];
 
-  let chunks: { buffer: Buffer }[];
+  let chunks: AudioChunk[];
   let cleanup: () => void = () => {};
 
   try {
@@ -241,7 +267,7 @@ export async function transcribeWithGroq(
     cleanup = result.cleanup;
   } catch (chunkErr) {
     logger.warn("Audio chunking failed, sending whole file:", chunkErr);
-    chunks = [{ buffer }];
+    chunks = [{ buffer, startSec: 0, endSec: 0 }];
   }
 
   const chunkDelayMs = options?.chunkDelayMs ?? TRANSCRIBE_CHUNK_DELAY_MS;
@@ -254,16 +280,34 @@ export async function transcribeWithGroq(
         throw new TranscribeCancelledError(transcripts);
       }
       const chunk = chunks[i];
-      options?.onChunkProgress?.(i + 1, total);
+      const chunkNum = i + 1;
+      const timeRange = formatChunkTimeRange(chunk);
+      options?.onChunkProgress?.(chunkNum, total);
       const chunkFileName =
-        chunks.length > 1 ? `chunk-${i + 1}.mp3` : fileName;
+        chunks.length > 1 ? `chunk-${chunkNum}.mp3` : fileName;
+      logger.log(
+        `>>> [WHISPER ${chunkNum}/${total}] Starting (${timeRange})`
+      );
       const text = await transcribeSingleChunk(chunk.buffer, apiKey, {
         language: options?.language,
         fileName: chunkFileName,
         prompt: options?.prompt,
       });
-      if (text.trim()) {
-        transcripts.push(text.trim());
+      const trimmed = text.trim();
+      logger.log(
+        `>>> [WHISPER ${chunkNum}/${total}] Finished (${timeRange}), ${trimmed.length} chars`
+      );
+      if (!trimmed) {
+        logger.log(
+          `>>> [WHISPER ${chunkNum}/${total}] *** EMPTY — likely silence/dead air ***`
+        );
+      } else if (trimmed.length < NEAR_EMPTY_WHISPER_CHARS) {
+        logger.log(
+          `>>> [WHISPER ${chunkNum}/${total}] *** NEAR-EMPTY (${trimmed.length} chars) — possible silence/dead air ***`
+        );
+      }
+      if (trimmed) {
+        transcripts.push(trimmed);
       }
       await options?.onChunkDone?.(i + 1, text.trim(), [...transcripts]);
       if (i < chunks.length - 1) {

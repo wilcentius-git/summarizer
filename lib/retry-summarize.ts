@@ -41,7 +41,7 @@ export async function processRateLimitedJob(
 
   try {
     let summary: string;
-    if (text.length <= SUMMARIZE_PIPELINE_STANDARD.summarizeChunkSize) {
+    if (!isAudio && text.length <= SUMMARIZE_PIPELINE_STANDARD.summarizeChunkSize) {
       await prisma.summaryJob.update({
         where: { id: job.id },
         data: { progressPercentage: 30 },
@@ -81,6 +81,8 @@ export async function processRateLimitedJob(
           {
             isChunk: true,
             isAudio,
+            chunkIndex: i,
+            chunkTotal: chunks.length,
             returnHeaders: true,
           }
         );

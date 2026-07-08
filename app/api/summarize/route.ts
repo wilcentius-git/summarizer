@@ -351,7 +351,6 @@ export async function POST(request: NextRequest) {
                 return;
               }
               const chunk = chunks[i];
-              logger.log(`[CHUNK ${i + 1}/${total}] Starting. Text length: ${chunk.length} chars`);
 
               const { content: part, headers: responseHeaders } = await summarizeWithGroq(
                 chunk,
@@ -359,12 +358,11 @@ export async function POST(request: NextRequest) {
                 {
                   isChunk: true,
                   isAudio,
+                  chunkIndex: i,
+                  chunkTotal: total,
                   glossary: glossary || undefined,
                   returnHeaders: true,
                 }
-              );
-              logger.log(
-                `>>> [CHUNK ${i + 1}/${total}] Summary length: ${part.length} chars (~${Math.round(part.length / 4)} tokens)`
               );
               chunkSummaries.push(part);
               await updateJob({

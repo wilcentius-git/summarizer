@@ -48,29 +48,40 @@ export function fixCommonTypos(text: string): string {
 }
 
 export function splitIntoChunks(text: string, maxSize: number): string[] {
-  if (text.length <= maxSize) return [text.trim()];
-  const chunks: string[] = [];
-  let remaining = text;
-  while (remaining.length > 0) {
-    if (remaining.length <= maxSize) {
-      chunks.push(remaining.trim());
-      break;
-    }
-    const segment = remaining.slice(0, maxSize);
-    let breakPoint = -1;
-    const minBreak = maxSize * 0.5;
-    for (const sep of ["\n\n", "\n", ". ", " "]) {
-      const idx = segment.lastIndexOf(sep);
-      if (idx >= minBreak) {
-        breakPoint = idx + sep.length;
+  let result: string[];
+  if (text.length <= maxSize) {
+    result = [text.trim()];
+  } else {
+    const chunks: string[] = [];
+    let remaining = text;
+    while (remaining.length > 0) {
+      if (remaining.length <= maxSize) {
+        chunks.push(remaining.trim());
         break;
       }
+      const segment = remaining.slice(0, maxSize);
+      let breakPoint = -1;
+      const minBreak = maxSize * 0.5;
+      for (const sep of ["\n\n", "\n", ". ", " "]) {
+        const idx = segment.lastIndexOf(sep);
+        if (idx >= minBreak) {
+          breakPoint = idx + sep.length;
+          break;
+        }
+      }
+      if (breakPoint <= 0) breakPoint = maxSize;
+      chunks.push(remaining.slice(0, breakPoint).trim());
+      remaining = remaining.slice(breakPoint).trim();
     }
-    if (breakPoint <= 0) breakPoint = maxSize;
-    chunks.push(remaining.slice(0, breakPoint).trim());
-    remaining = remaining.slice(breakPoint).trim();
+    result = chunks.filter((c) => c.length > 0);
   }
-  return chunks.filter((c) => c.length > 0);
+  logger.log(
+    `>>> [SPLIT] Produced ${result.length} chunk(s) from ${text.length} chars (maxSize=${maxSize})`
+  );
+  result.forEach((chunk, i) => {
+    logger.log(`>>> [SPLIT] Chunk ${i + 1}/${result.length}: ${chunk.length} chars`);
+  });
+  return result;
 }
 
 export const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
@@ -226,23 +237,28 @@ ATURAN UMUM:
 
 const SUMMARIZE_CHUNK_MEETING_PROMPT = `Tulis semua output dalam Bahasa Indonesia.
 Gunakan hanya karakter ASCII standar. Hindari simbol seperti ≈, →, ×, ±, tanda kutip lengkung, atau em dash — gunakan kata (mis. 'sekitar', 'menjadi') atau tanda ASCII biasa (-, ->, x, +/-) sebagai gantinya.
-Anda adalah asisten yang mengekstrak poin penting dari transkrip audio.
-Transkrip bisa berupa rapat pemerintah, wawancara, podcast, atau diskusi — tangani semua jenis.
-Ekstrak SEMUA poin penting dari bagian transkrip berikut.
+Anda adalah asisten notulen rapat pemerintah yang mengekstrak poin dari transkrip rapat atau diskusi resmi.
+Transkrip ini adalah rapat/pembahasan pemerintah — bukan podcast, wawancara, atau konten non-rapat.
+
+Ekstrak poin HANYA jika memenuhi minimal SATU kriteria berikut:
+- menyebut nama spesifik (orang, jabatan, unit/organisasi, program, lokasi)
+- menyebut angka, target, anggaran, persentase, atau statistik
+- mencatat keputusan, kesepakatan, atau arahan konkret
+- mencatat pernyataan langsung peserta (siapa berkata apa)
 
 ATURAN:
-- Gunakan daftar bernomor (1., 2.) dan sub-list huruf (a., b., c.)
+- Gunakan daftar bernomor (1., 2.) untuk poin utama, dan bullet (-) untuk sub-poin di bawahnya
 - Bold (**) untuk nama orang, organisasi, dan istilah teknis
 - PERTAHANKAN nama orang, organisasi/unit, dan detail teknis
-- Untuk podcast/wawancara: sertakan semua topik, argumen, anekdot, dan contoh konkret yang disampaikan narasumber — ini konten bernilai, bukan noise
 - Fokus pada poin UNIK. Gabungkan ide mirip; jangan ulangi
-- SPESIFISITAS: sertakan detail konkret (siapa berkata apa, contoh nyata, angka)
+- BUANG basa-basi, ucapan terima kasih, filler, dan small talk — jangan dijadikan poin
+- Jika bagian ini tidak memuat konten substantif, kembalikan teks kosong (nol poin). JANGAN membuat poin hanya agar ada output.
+- SPESIFISITAS: setiap poin harus memuat detail konkret dari transkrip
 - KOREKSI TRANSKRIPSI: perbaiki kesalahan speech-to-text
   mis. "ekspetasi"→"ekspektasi", "infestasi"→"investasi"
 - Hindari kata "juga" di awal atau akhir kalimat
-- Tanpa pembukaan, langsung poin saja
-- Pastikan kalimat terakhir selesai lengkap
-- Jangan kembalikan teks kosong — selalu ekstrak minimal beberapa poin dari bagian apapun`;
+- Tanpa pembukaan, langsung poin saja (atau kosong jika tidak ada poin)
+- Pastikan kalimat terakhir selesai lengkap`;
 
 const SUMMARIZE_CHUNK_DOC_PROMPT = `Anda asisten notulen rapat pemerintah yang profesional. Ekstrak poin penting dari bagian transkrip berikut: maksimal 5 poin, tiap poin maksimal 30 kata. Bahasa Indonesia formal. Tanpa kesimpulan atau kalimat penutup.
 
@@ -252,21 +268,28 @@ Format output:
 
 const SUMMARIZE_MERGE_PROMPT = `Tulis semua output dalam Bahasa Indonesia.
 Gunakan hanya karakter ASCII standar. Hindari simbol seperti ≈, →, ×, ±, tanda kutip lengkung, atau em dash — gunakan kata (mis. 'sekitar', 'menjadi') atau tanda ASCII biasa (-, ->, x, +/-) sebagai gantinya.
-URUTAN: Susun poin Rangkuman secara KRONOLOGIS mengikuti [Bagian 1], [Bagian 2], dst.
-FILTER: Rangkuman MAKSIMAL 12-15 poin. Gabung atau buang poin yang hanya disebut sekilas (1-2 kalimat, tidak dikembangkan). Pertahankan poin yang dibahas mendalam (banyak detail/contoh/argumen). Buang basa-basi, ajakan follow/subscribe, dan komentar meta soal podcast/rapat itu sendiri.
-PENTING: Ringkasan Eksekutif dan Insight tambahan MAKSIMAL 40 kata masing-masing. JANGAN lebih.
 Input di bawah terdiri dari BEBERAPA rangkuman per bagian. Gabungkan menjadi SATU rangkuman final.
+PENTING: Ringkasan Eksekutif dan Insight tambahan MAKSIMAL 40 kata masing-masing. JANGAN lebih.
+
 Output HANYA:
 - SATU **Ringkasan Eksekutif** (ikhtisar tingkat tinggi, MAKSIMAL 40 kata. Jangan salin kalimat dari Rangkuman.)
-- SATU **Rangkuman** (daftar bernomor 1., 2., 3., sesuai urutan kronologis dan filter di atas. Setiap poin: detail konkret—nama, angka, contoh. JANGAN gunakan sub-poin a., b., c.—gabungkan sebagai kalimat lanjutan dalam paragraf bernomor sama.)
-- SATU **Insight tambahan** (MAKSIMAL 40 kata total. Takeaway non-obvious DARI narasumber—bukan nasihat umum.)
+- SATU **Rangkuman** (bab-bab topik dengan heading bold dan daftar bernomor per bab — lihat aturan struktur di bawah)
+- SATU **Insight tambahan** (MAKSIMAL 40 kata total. Takeaway non-obvious dari peserta rapat—bukan nasihat umum.)
+
+STRUKTUR RANGKUMAN (bab topik):
+- Susun isi Rangkuman menjadi bab-bab berdasarkan topik, bukan satu daftar datar kronologis.
+- Urutkan bab secara kronologis menurut kemunculan pertama topik tersebut di [Bagian 1], [Bagian 2], dst.
+- Topik hanya mendapat bab sendiri jika memuat minimal satu: keputusan/arahan konkret, angka/statistik, pihak bertanggung jawab yang dinamai, atau action item/tindak lanjut.
+- Topik tanpa elemen di atas digabung ke bab terkait atau ke bab **Lain-lain** — jangan buat bab hanya untuk padding.
+- MAKSIMAL 10 bab. Jumlah bab harus menyesuaikan panjang/kedalaman rapat; jangan memecah satu topik menjadi beberapa bab hanya untuk mendekati batas maksimum.
+- Setiap bab: satu heading bold singkat di baris sendiri, diikuti baris kosong, lalu daftar bernomor (1., 2., ...) yang dimulai ulang dari 1 tiap bab.
+- Setiap poin: detail konkret—nama, angka, keputusan. Sub-poin bullet (-) dari input BOLEH dipertahankan jika sudah ada dan relevan—jangan paksa jadi kalimat tunggal jika strukturnya lebih jelas sebagai sub-poin.
+
 Beri baris kosong antara judul section dan isi.
 ATURAN:
 - DEDUPLIKASI: Poin sama/mirip disebut SATU KALI.
 - CROSS-SECTION DEDUP: Ringkasan Eksekutif, Rangkuman, Insight tambahan tidak boleh mengandung ide yang sama.
 - SPESIFISITAS: Buang poin generik yang berlaku untuk konteks apa saja.
-- Format RAPAT/NOTULA hanya jika bagian JELAS berisi rapat (peserta, jalannya rapat, diskusi). Gunakan **bold** heading, daftar bernomor, sub-list huruf a./b./c. Untuk **Kesimpulan**: boleh tambahkan insight sendiri.
-- Jika buku/artikel/podcast: 3 bagian seperti di atas.
 - Hindari kata "juga" di awal/akhir kalimat. Variasikan frasa penghubung.
 - KOREKSI TRANSKRIPSI: perbaiki kesalahan speech-to-text (mis. "ekspetasi"→"ekspektasi").
 - Pastikan rangkuman selesai LENGKAP, tidak terpotong di tengah kalimat.
@@ -284,7 +307,8 @@ ATURAN:
   contoh poin yang DIBUANG: "kerja keras adalah kunci sukses", "teknologi terus berkembang", "komunikasi itu penting"
   contoh poin yang DIPERTAHANKAN: "Elon Musk menyatakan Starship dapat mengurangi biaya orbit menjadi $100/kg", "DeepSeek mengurangi biaya komputasi AI hingga 40x"
 - Gabungkan poin yang memiliki subjek dan ide yang sama menjadi satu
-- Tidak ada batas jumlah poin — pertahankan semua yang memenuhi kriteria di atas
+- Jika poin input memuat sub-poin bullet (-), pertahankan strukturnya saat digabung—jangan diratakan jadi satu kalimat panjang.
+- MAKSIMAL 15 poin dalam output. Jika lebih dari 15 poin memenuhi kriteria, pertahankan yang paling spesifik (punya nama, angka, atau keputusan)—gabungkan atau buang sisanya.
 - Tanpa heading, tanpa pembukaan, tanpa penutup
 - Langsung daftar saja`;
 
@@ -629,6 +653,10 @@ export type SummarizeWithGroqOptions = {
   glossary?: string;
   isAudio?: boolean;
   returnHeaders?: boolean;
+  /** 0-based index for dev logging when summarizing audio chunks. */
+  chunkIndex?: number;
+  /** Total chunk count for dev logging when summarizing audio chunks. */
+  chunkTotal?: number;
   /** Overrides default system prompt from isChunk/isMerge flags; glossary is still appended. */
   systemPrompt?: string;
   /** Explicit max_tokens for the completion. */
@@ -728,12 +756,16 @@ export async function summarizeWithGroq(
   }
 
   const result = await execute();
-  if (options?.isChunk) {
-    try {
-      logger.log("[CHUNK]", result.content.length, "chars:", result.content.slice(0, 80));
-    } catch {
-      // ignore debug log failures
-    }
+  if (options?.isChunk && isAudio) {
+    const idx =
+      options.chunkIndex != null ? options.chunkIndex + 1 : "?";
+    const total = options.chunkTotal ?? "?";
+    logger.log(
+      `>>> [SUMMARIZE_CHUNK ${idx}/${total}] Input: ${content.length} chars`
+    );
+    logger.log(
+      `>>> [SUMMARIZE_CHUNK ${idx}/${total}] Output (${result.content.length} chars):\n${result.content}`
+    );
   }
   if (options?.returnHeaders === true) {
     return result;

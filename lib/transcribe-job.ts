@@ -17,6 +17,7 @@ import { prisma } from "@/lib/prisma";
 import { processRateLimitedJob } from "@/lib/retry-summarize";
 import { SUMMARIZE_PIPELINE_STANDARD } from "@/lib/summarize-pipeline";
 import {
+  logDeduplicatedTranscript,
   TranscribeCancelledError,
   transcribeWithGroq,
 } from "@/lib/transcribe-audio";
@@ -90,6 +91,7 @@ export async function processTranscriptionJob(
   }
 
   transcript = deduplicateParagraphs(transcript);
+  logDeduplicatedTranscript(transcript);
 
   await prisma.summaryJob.update({
     where: { id: job.id },

@@ -45,3 +45,4 @@ next-env.d.ts
 
 # Python venv
 /summarizer_venv
+worker.log

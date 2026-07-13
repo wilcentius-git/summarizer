@@ -273,16 +273,13 @@ PENTING: Ringkasan Eksekutif dan Insight tambahan MAKSIMAL 40 kata masing-masing
 
 Output HANYA:
 - SATU **Ringkasan Eksekutif** (ikhtisar tingkat tinggi, MAKSIMAL 40 kata. Jangan salin kalimat dari Rangkuman.)
-- SATU **Rangkuman** (bab-bab topik dengan heading bold dan daftar bernomor per bab — lihat aturan struktur di bawah)
+- SATU **Rangkuman** (satu daftar bernomor 1., 2., 3., ... secara kronologis — lihat aturan di bawah)
 - SATU **Insight tambahan** (MAKSIMAL 40 kata total. Takeaway non-obvious dari peserta rapat—bukan nasihat umum.)
 
-STRUKTUR RANGKUMAN (bab topik):
-- Susun isi Rangkuman menjadi bab-bab berdasarkan topik, bukan satu daftar datar kronologis.
-- Urutkan bab secara kronologis menurut kemunculan pertama topik tersebut di [Bagian 1], [Bagian 2], dst.
-- Topik hanya mendapat bab sendiri jika memuat minimal satu: keputusan/arahan konkret, angka/statistik, pihak bertanggung jawab yang dinamai, atau action item/tindak lanjut.
-- Topik tanpa elemen di atas digabung ke bab terkait atau ke bab **Lain-lain** — jangan buat bab hanya untuk padding.
-- MAKSIMAL 10 bab. Jumlah bab harus menyesuaikan panjang/kedalaman rapat; jangan memecah satu topik menjadi beberapa bab hanya untuk mendekati batas maksimum.
-- Setiap bab: satu heading bold singkat di baris sendiri, diikuti baris kosong, lalu daftar bernomor (1., 2., ...) yang dimulai ulang dari 1 tiap bab.
+URUTAN DAN FILTER RANGKUMAN:
+- Susun semua poin dalam SATU daftar bernomor berurutan (1., 2., 3., ...) untuk seluruh section Rangkuman — jangan pecah menjadi bab, heading terpisah, atau daftar yang dimulai ulang.
+- Urutkan poin secara KRONOLOGIS mengikuti [Bagian 1], [Bagian 2], dst.
+- MAKSIMAL 50 poin. Jika lebih dari 50 poin memenuhi kriteria, pertahankan yang paling spesifik (nama, angka, keputusan)—gabungkan atau buang sisanya.
 - Setiap poin: detail konkret—nama, angka, keputusan. Sub-poin bullet (-) dari input BOLEH dipertahankan jika sudah ada dan relevan—jangan paksa jadi kalimat tunggal jika strukturnya lebih jelas sebagai sub-poin.
 
 Beri baris kosong antara judul section dan isi.

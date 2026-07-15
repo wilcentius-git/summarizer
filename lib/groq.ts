@@ -271,6 +271,11 @@ Gunakan hanya karakter ASCII standar. Hindari simbol seperti ≈, →, ×, ±, t
 Input di bawah terdiri dari BEBERAPA rangkuman per bagian. Gabungkan menjadi SATU rangkuman final.
 PENTING: Ringkasan Eksekutif dan Insight tambahan MAKSIMAL 40 kata masing-masing. JANGAN lebih.
 
+LANGKAH SEBELUM MENULIS RINGKASAN EKSEKUTIF:
+- Sebelum menulis **Ringkasan Eksekutif**, identifikasi dulu: (1) tujuan atau agenda utama rapat, dan (2) elemen paling konkret yang benar-benar ada di transkrip—bisa berupa keputusan, angka, pihak bertanggung jawab yang dinamai, atau isu/kendala mencolok.
+- Jangan memaksakan kategori di atas jika tidak ada di konten. Jika spesifikasinya tipis, akui itu—jangan mengisi dengan bahasa generik.
+- **Ringkasan Eksekutif** harus berpusat pada apa yang teridentifikasi, bukan template kosong.
+
 Output HANYA:
 - SATU **Ringkasan Eksekutif** (ikhtisar tingkat tinggi, MAKSIMAL 40 kata. Jangan salin kalimat dari Rangkuman.)
 - SATU **Rangkuman** (satu daftar bernomor 1., 2., 3., ... secara kronologis — lihat aturan di bawah)

@@ -9,6 +9,48 @@ import { sanitizeMultilineText } from "@/lib/text-utils";
 
 const QUEUED_JOB_POLL_MS = 5000;
 
+const RATE_LIMIT_WAIT_MESSAGE =
+  "Menunggu batas API Groq, akan dilanjutkan otomatis…";
+
+const RESTORABLE_JOB_STATUSES = new Set([
+  "processing",
+  "queued_transcription",
+  "waiting_rate_limit",
+]);
+
+function isRestorableJobStatus(status: string): boolean {
+  return RESTORABLE_JOB_STATUSES.has(status);
+}
+
+function initialRestoreProgress(job: SummaryJobItem): SummarizeProgress {
+  if (job.status === "waiting_rate_limit") {
+    return {
+      phase: "transcribing",
+      current: 0,
+      total: 1,
+      message: RATE_LIMIT_WAIT_MESSAGE,
+      step: 1,
+      stepLabel: "Transkripsi",
+    };
+  }
+  if (job.status === "queued_transcription") {
+    return {
+      phase: "transcribing",
+      current: 0,
+      total: 1,
+      message: "Audio sedang diproses di background. Anda bisa menutup tab ini.",
+      step: 1,
+      stepLabel: "Transkripsi",
+    };
+  }
+  return progressFromPolledJob({
+    status: job.status,
+    progressPercentage: job.progressPercentage,
+    processedChunks: job.processedChunks,
+    totalChunks: job.totalChunks,
+  });
+}
+
 export type SummarizeProgress = {
   phase: string;
   current: number;
@@ -36,7 +78,7 @@ function progressFromPolledJob(job: PolledSummaryJob): SummarizeProgress {
       phase: "transcribing",
       current: 0,
       total: 1,
-      message: "Menunggu rate limit Groq, akan dilanjutkan otomatis…",
+      message: RATE_LIMIT_WAIT_MESSAGE,
       step: 1,
       stepLabel: "Transkripsi",
     };
@@ -272,25 +314,13 @@ export function useSummarize(
       const data = (await res.json()) as { jobs?: SummaryJobItem[] };
       const jobs = data.jobs ?? [];
       const job = jobs.find(
-        (j) =>
-          j.userId === user.id &&
-          (j.status === "processing" || j.status === "queued_transcription")
+        (j) => j.userId === user.id && isRestorableJobStatus(j.status)
       );
       if (!job) return;
 
       setError(null);
       setResumeLoading(job.id);
-      setResumeProgress({
-        phase: "transcribing",
-        current: 0,
-        total: 1,
-        message:
-          job.status === "queued_transcription"
-            ? "Audio sedang diproses di background. Anda bisa menutup tab ini."
-            : "Mentranskripsi audio…",
-        step: 1,
-        stepLabel: "Transkripsi",
-      });
+      setResumeProgress(initialRestoreProgress(job));
 
       const controller = new AbortController();
       resumeAbortRef.current = controller;

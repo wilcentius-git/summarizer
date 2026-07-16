@@ -1,6 +1,7 @@
 "use client";
 
 import { ArrowLeft, Eye, EyeOff } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
@@ -25,7 +26,7 @@ export default function SettingsPage() {
   if (authLoading || !user || user.isAdmin) {
     return (
       <main className="min-h-screen bg-kemenkum-blue py-8 px-4 flex justify-center items-center overflow-y-auto">
-        <div className="w-full max-w-3xl bg-white rounded-lg shadow-lg px-4 sm:px-8 pt-4 pb-10 mx-auto overflow-x-hidden text-center">
+        <div className="w-full max-w-3xl bg-white rounded-lg shadow-lg px-4 sm:px-8 pt-4 pb-10 mx-auto overflow-x-hidden text-center animate-fade-slide-in">
           <p className="text-sm text-gray-600">Memuat…</p>
         </div>
       </main>
@@ -34,16 +35,15 @@ export default function SettingsPage() {
 
   return (
     <main className="min-h-screen bg-kemenkum-blue py-8 px-4 flex justify-center items-center overflow-y-auto">
-      <div className="w-full max-w-3xl bg-white rounded-lg shadow-lg px-4 sm:px-8 pt-4 pb-10 mx-auto overflow-x-hidden">
+      <div className="w-full max-w-3xl bg-white rounded-lg shadow-lg px-4 sm:px-8 pt-4 pb-10 mx-auto overflow-x-hidden animate-fade-slide-in">
         <div className="flex items-center gap-3 mb-6">
-          <button
-            type="button"
-            onClick={() => router.push("/")}
+          <Link
+            href="/"
             aria-label="Kembali ke aplikasi"
             className="p-2 rounded-lg text-kemenkum-blue hover:opacity-80 shrink-0"
           >
             <ArrowLeft size={24} strokeWidth={2.5} />
-          </button>
+          </Link>
           <h1 className="text-xl font-bold text-kemenkum-blue truncate">Pengaturan</h1>
         </div>
         <div className="space-y-2">

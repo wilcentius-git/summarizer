@@ -1,8 +1,8 @@
 "use client";
 
 import Image from "next/image";
+import Link from "next/link";
 import { Pause, Settings, X } from "lucide-react";
-import { useRouter } from "next/navigation";
 import { useCallback, useRef, useState } from "react";
 
 import kemenkumLogo from "@/assets/kemenkum_logo.png";
@@ -17,7 +17,6 @@ import { RawResult } from "@/app/components/RawResult";
 import { ResumeCard } from "@/app/components/ResumeCard";
 
 export default function Home() {
-  const router = useRouter();
   const { user, logout } = useAuth();
   const { groqApiKey, setGroqApiKey } = useGroqApiKey();
   const [error, setError] = useState<string | null>(null);
@@ -80,14 +79,13 @@ export default function Home() {
               {user.name?.trim() || user.email}
             </span>
             <div className="flex items-center shrink-0">
-              <button
-                type="button"
-                onClick={() => router.push(user.isAdmin ? "/admin/settings" : "/settings")}
+              <Link
+                href={user.isAdmin ? "/admin/settings" : "/settings"}
                 aria-label="Pengaturan"
                 className="p-2 rounded-lg text-kemenkum-blue hover:opacity-80 shrink-0"
               >
                 <Settings size={24} strokeWidth={2.5} />
-              </button>
+              </Link>
               <button
                 type="button"
                 onClick={logout}

@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, ChevronDown, ChevronRight, Eye, EyeOff, Pencil, X } from "lucide-react";
+import { ArrowLeft, ChevronRight, Eye, EyeOff, Pencil, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { useAuth } from "@/app/contexts/AuthContext";
@@ -316,7 +316,7 @@ export default function AdminWhitelistPage() {
   if (authLoading || !user?.isAdmin) {
     return (
       <main className="min-h-screen bg-kemenkum-blue py-8 px-4 flex justify-center items-center overflow-y-auto">
-        <div className="w-full max-w-3xl bg-white rounded-lg shadow-lg px-4 sm:px-8 pt-4 pb-10 mx-auto overflow-x-hidden text-center">
+        <div className="w-full max-w-3xl bg-white rounded-lg shadow-lg px-4 sm:px-8 pt-4 pb-10 mx-auto overflow-x-hidden text-center animate-fade-slide-in">
           <p className="text-sm text-gray-600">Memuat…</p>
         </div>
       </main>
@@ -325,7 +325,7 @@ export default function AdminWhitelistPage() {
 
   return (
     <main className="min-h-screen bg-kemenkum-blue py-8 px-4 flex justify-center items-center overflow-y-auto">
-      <div className="w-full max-w-3xl bg-white rounded-lg shadow-lg px-4 sm:px-8 pt-4 pb-10 mx-auto overflow-x-hidden text-center">
+      <div className="w-full max-w-3xl bg-white rounded-lg shadow-lg px-4 sm:px-8 pt-4 pb-10 mx-auto overflow-x-hidden text-center animate-fade-slide-in">
         <div className="flex items-center gap-3 mb-6">
           <button
             type="button"
@@ -347,15 +347,16 @@ export default function AdminWhitelistPage() {
             aria-expanded={satuanKerjaExpanded}
             className="flex items-center justify-start gap-2 w-full py-2 text-base font-semibold text-kemenkum-blue rounded-lg"
           >
-            {satuanKerjaExpanded ? (
-              <ChevronDown size={20} strokeWidth={2.5} />
-            ) : (
-              <ChevronRight size={20} strokeWidth={2.5} />
-            )}
+            <ChevronRight
+              size={20}
+              strokeWidth={2.5}
+              className={`transition-transform duration-300 ${satuanKerjaExpanded ? "rotate-90" : "rotate-0"}`}
+            />
             Kelola Satuan Kerja
           </button>
-          {satuanKerjaExpanded && (
-            <div className="mt-3">
+          <div
+            className={`mt-3 overflow-hidden transition-all duration-300 ease-in-out ${satuanKerjaExpanded ? "max-h-[2000px] opacity-100" : "max-h-0 opacity-0"}`}
+          >
               <form onSubmit={handleAddUnit} className="flex flex-col gap-3 mb-4">
                 <div className="flex flex-col sm:flex-row gap-3">
                   <input
@@ -552,7 +553,6 @@ export default function AdminWhitelistPage() {
                 </div>
               )}
             </div>
-          )}
         </section>
 
         <section className="mb-8 text-left">

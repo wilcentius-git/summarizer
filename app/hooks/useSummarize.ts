@@ -8,6 +8,33 @@ import type { SummaryJobItem } from "@/app/hooks/useHistory";
 import { sanitizeMultilineText } from "@/lib/text-utils";
 
 const QUEUED_JOB_POLL_MS = 5000;
+const POLL_RETRY_DELAYS_MS = [2000, 4000] as const;
+const POLL_MAX_ATTEMPTS = 3;
+
+function sleepUnlessAborted(ms: number, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) {
+    const err = new Error("Aborted");
+    err.name = "AbortError";
+    throw err;
+  }
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      const err = new Error("Aborted");
+      err.name = "AbortError";
+      reject(err);
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+function isAbortError(err: unknown): boolean {
+  return err instanceof Error && err.name === "AbortError";
+}
 
 const RATE_LIMIT_WAIT_MESSAGE =
   "Menunggu batas API Groq, akan dilanjutkan otomatis…";
@@ -213,38 +240,108 @@ async function pollQueuedTranscriptionJob(
     return "continue";
   };
 
-  const first = await pollOnce();
+  const pollOnceWithRetry = async (): Promise<"continue" | "terminal"> => {
+    let lastError: unknown;
+    for (let attempt = 0; attempt < POLL_MAX_ATTEMPTS; attempt++) {
+      if (signal.aborted || !options.isSessionActive()) {
+        return "terminal";
+      }
+      if (typeof document !== "undefined" && document.hidden) {
+        return "continue";
+      }
+      try {
+        return await pollOnce();
+      } catch (err) {
+        if (isAbortError(err)) {
+          throw err;
+        }
+        lastError = err;
+        if (attempt >= POLL_MAX_ATTEMPTS - 1) {
+          break;
+        }
+        if (typeof document !== "undefined" && document.hidden) {
+          return "continue";
+        }
+        await sleepUnlessAborted(POLL_RETRY_DELAYS_MS[attempt], signal);
+      }
+    }
+    throw lastError;
+  };
+
+  const first = await pollOnceWithRetry();
   if (first === "terminal") {
     return;
   }
 
   await new Promise<void>((resolve, reject) => {
-    const intervalId = setInterval(() => {
+    let done = false;
+    let pollInFlight = false;
+
+    const finish = (onDone: () => void) => {
+      if (done) return;
+      done = true;
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      options.stopPolling();
+      onDone();
+    };
+
+    const runPollCycle = async (): Promise<boolean> => {
+      if (done || pollInFlight || document.hidden) {
+        return false;
+      }
+      pollInFlight = true;
+      try {
+        const result = await pollOnceWithRetry();
+        if (result === "terminal") {
+          finish(resolve);
+          return true;
+        }
+        return false;
+      } catch (err) {
+        finish(() => reject(err));
+        return true;
+      } finally {
+        pollInFlight = false;
+      }
+    };
+
+    const startPollInterval = () => {
+      if (done || document.hidden) return;
+      options.stopPolling();
+      const intervalId = setInterval(() => {
+        void runPollCycle();
+      }, QUEUED_JOB_POLL_MS);
+      options.setPollInterval(intervalId);
+    };
+
+    const onVisibilityChange = () => {
+      if (done) return;
+      if (document.hidden) {
+        options.stopPolling();
+        return;
+      }
       void (async () => {
-        try {
-          const result = await pollOnce();
-          if (result === "terminal") {
-            options.stopPolling();
-            resolve();
-          }
-        } catch (err) {
-          options.stopPolling();
-          reject(err);
+        const stopped = await runPollCycle();
+        if (!stopped && !done) {
+          startPollInterval();
         }
       })();
-    }, QUEUED_JOB_POLL_MS);
+    };
 
-    options.setPollInterval(intervalId);
+    document.addEventListener("visibilitychange", onVisibilityChange);
 
     const onAbort = () => {
-      options.stopPolling();
-      resolve();
+      finish(resolve);
     };
     if (signal.aborted) {
       onAbort();
       return;
     }
     signal.addEventListener("abort", onAbort, { once: true });
+
+    if (!document.hidden) {
+      startPollInterval();
+    }
   });
 }
 

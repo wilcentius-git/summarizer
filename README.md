@@ -36,6 +36,11 @@ The script prints the new key once (prefixed with `sk-`). **Store it immediately
 
 ### Endpoint
 
+| Method | Path | Description |
+| ------ | ---- | ----------- |
+| `POST` | `/api/summarize` | Upload a document or audio file. Returns an NDJSON stream (see Response format). For audio, the stream ends with a `queued` line — poll the job endpoint below. |
+| `GET` | `/api/summary-jobs/:jobId` | Poll job status. Returns JSON with `status`, `summaryText`, `errorMessage`, progress fields, etc. Use after a `queued` response for audio, with the same `Authorization: Bearer <key>` header. |
+
 **`POST /api/summarize`**
 
 `Content-Type: multipart/form-data`
@@ -80,6 +85,32 @@ Example stream (abbreviated):
 | `error`    | Failure; includes `message`. The HTTP status may still be 200; check stream content. |
 
 Other line types (e.g. `waiting_rate_limit`, `cancelled`) can appear under rate limits or cancellation; see the Architecture section for job statuses.
+
+### Handling Audio Files (Async)
+
+Audio files are processed in the background. Unlike documents, the `POST /api/summarize` response will contain a queued event instead of a final summary:
+
+```json
+{"type":"queued","jobId":"..."}
+```
+
+The caller must poll `GET /api/summary-jobs/<jobId>` with the same `Authorization: Bearer <key>` header until `status` is `completed`, `failed`, or `cancelled`. When completed, read `summaryText` from the response. Recommended poll interval: every **5 seconds**.
+
+```bash
+curl "https://summarize.kemenkum.go.id/api/summary-jobs/<jobId>" \
+  -H "Authorization: Bearer sk-your-key-here"
+```
+
+Pseudocode:
+
+```
+post audio → get jobId
+loop every 5s:
+    GET /api/summary-jobs/<jobId>
+    if status == "completed" → read summaryText, stop
+    if status == "failed" or "cancelled" → handle error, stop
+    else → keep polling
+```
 
 ### Notes
 

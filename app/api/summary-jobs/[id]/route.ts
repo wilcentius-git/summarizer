@@ -2,24 +2,40 @@ import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { prisma } from "@/lib/prisma";
 import { verifyToken } from "@/lib/auth";
+import { validateApiKey } from "@/lib/api-key";
 import { deleteAudio } from "@/lib/audio-storage";
 import { jobVisibilityWhere } from "@/lib/job-visibility";
 
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const cookieStore = await cookies();
-    const token = cookieStore.get("auth-token")?.value;
-    const payload = token ? await verifyToken(token) : null;
+    let payload: { userId: string; email: string } | null = null;
+    let isApiKeyAuth = false;
+
+    const authHeader = request.headers.get("authorization");
+    if (authHeader?.startsWith("Bearer ")) {
+      const apiKeyRecord = await validateApiKey(authHeader.slice(7));
+      if (apiKeyRecord) {
+        payload = { userId: "admin", email: `api-key:${apiKeyRecord.name}` };
+        isApiKeyAuth = true;
+      }
+    }
+
+    if (!payload) {
+      const cookieStore = await cookies();
+      const token = cookieStore.get("auth-token")?.value;
+      payload = token ? await verifyToken(token) : null;
+    }
+
     if (!payload) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     const { id } = await params;
     const job = await prisma.summaryJob.findFirst({
-      where: { id, userId: payload.userId },
+      where: isApiKeyAuth ? { id } : { id, userId: payload.userId },
       select: {
         id: true,
         status: true,

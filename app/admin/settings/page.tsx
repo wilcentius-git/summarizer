@@ -16,6 +16,12 @@ const MENU_ITEMS = [
       "Tambah atau hapus NIP yang diizinkan mengakses aplikasi, serta kelola satuan kerja.",
   },
   {
+    href: "/admin/glossary",
+    title: "Glosarium Transkripsi",
+    description:
+      "Kelola istilah dengan ejaan benar dan kesalahan transkripsi yang dikenal untuk koreksi otomatis saat merangkum.",
+  },
+  {
     href: "/admin/logs",
     title: "Audit Logs",
     description:

@@ -24,3 +24,24 @@ export const satuanKerjaNameSchema = z.object({
 export const whitelistSatuanKerjaSchema = z.object({
   satuanKerjaId: z.string().trim().min(1, "Satuan kerja wajib dipilih"),
 });
+
+export const glossaryTermSchema = z.object({
+  term: z
+    .string()
+    .trim()
+    .min(1, "Istilah wajib diisi")
+    .max(200, "Istilah terlalu panjang"),
+  commonMistakes: z
+    .string()
+    .trim()
+    .max(1000, "Daftar kesalahan terlalu panjang")
+    .optional()
+    .default(""),
+  definition: z
+    .string()
+    .trim()
+    .max(500, "Definisi terlalu panjang")
+    .optional()
+    .nullable()
+    .transform((v) => v || null),
+});

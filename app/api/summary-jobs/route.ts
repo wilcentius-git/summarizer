@@ -16,11 +16,12 @@ export async function GET() {
     const visibility = await jobVisibilityWhere(payload.userId);
 
     const rows = await prisma.summaryJob.findMany({
-      where: visibility,
+      where: { ...visibility, isApiJob: false },
       orderBy: { uploadTime: "desc" },
       select: {
         id: true,
         userId: true,
+        isApiJob: true,
         filename: true,
         fileType: true,
         uploadTime: true,

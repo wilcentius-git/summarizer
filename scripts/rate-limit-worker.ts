@@ -22,6 +22,8 @@ import { logger } from "../lib/logger";
 
 const CHECK_INTERVAL_MS = 5 * 1000; // 5 seconds
 const RETRY_AFTER_HOURS = 1;
+const API_JOB_RETENTION_MS = 6 * 60 * 60 * 1000;
+const API_JOB_CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
 
 function isPrismaRecordNotFound(err: unknown): boolean {
   return (
@@ -367,11 +369,53 @@ async function processWaitingRateLimitJobs() {
       }
 }
 
+async function cleanupOldApiJobs() {
+  const cutoff = new Date(Date.now() - API_JOB_RETENTION_MS);
+  const staleJobs = await prisma.summaryJob.findMany({
+    where: {
+      isApiJob: true,
+      uploadTime: { lt: cutoff },
+    },
+    select: { id: true, audioPath: true },
+  });
+
+  if (staleJobs.length === 0) return;
+
+  for (const job of staleJobs) {
+    if (job.audioPath) {
+      deleteAudio(job.audioPath);
+    }
+  }
+
+  const result = await prisma.summaryJob.deleteMany({
+    where: {
+      isApiJob: true,
+      uploadTime: { lt: cutoff },
+    },
+  });
+
+  if (result.count > 0) {
+    logger.log(`[worker] Cleaned up ${result.count} old API job(s).`);
+  }
+}
+
 async function runWorkerLoop() {
+  let lastApiJobCleanupAt = 0;
+
   while (true) {
     try {
       await processQueuedTranscriptionJobs();
       await processWaitingRateLimitJobs();
+
+      const now = Date.now();
+      if (now - lastApiJobCleanupAt >= API_JOB_CLEANUP_INTERVAL_MS) {
+        lastApiJobCleanupAt = now;
+        try {
+          await cleanupOldApiJobs();
+        } catch (err) {
+          console.error("[worker] API job cleanup error:", err);
+        }
+      }
     } catch (err) {
       console.error("[worker] Loop error:", err);
     }

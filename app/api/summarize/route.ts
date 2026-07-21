@@ -35,6 +35,11 @@ import { resolveGroqApiKey } from "@/lib/resolve-groq-api-key";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { writeAuditLog } from "@/lib/audit-log";
 import { logger } from "@/lib/logger";
+import {
+  loadAllGlossaryTerms,
+  resolveGlossaryForContent,
+  type GlossaryContext,
+} from "@/lib/glossary";
 
 function sendStreamLine(controller: ReadableStreamDefaultController<Uint8Array>, obj: object) {
   const encoder = new TextEncoder();
@@ -159,6 +164,7 @@ export async function POST(request: NextRequest) {
       status: "pending",
       progressPercentage: 0,
       groqAttempts: 0,
+      isApiJob: payload.email.startsWith("api-key:"),
     },
   });
 
@@ -314,6 +320,13 @@ export async function POST(request: NextRequest) {
 
         try {
           logger.log(`>>> [SUMMARIZE] Starting. Text length: ${text.length} chars`);
+          const allGlossaryTerms = await loadAllGlossaryTerms();
+          const glossaryContext: GlossaryContext = {
+            allTerms: allGlossaryTerms,
+            perRequest: glossary || undefined,
+          };
+          const perRequestGlossary = glossary || undefined;
+
           if (!isAudio && text.length <= pipeline.summarizeChunkSize) {
             await updateJob({ progressPercentage: 60 });
             send({
@@ -326,7 +339,9 @@ export async function POST(request: NextRequest) {
               stepLabel: "Rangkuman",
             });
             summarizeStartMs = Date.now();
-            summary = await summarizeWithGroq(text, apiKey, { glossary: glossary || undefined });
+            summary = await summarizeWithGroq(text, apiKey, {
+              glossary: resolveGlossaryForContent(allGlossaryTerms, text, perRequestGlossary),
+            });
             summarizeEndMs = Date.now();
           } else {
             await updateJob({ progressPercentage: 60 });
@@ -360,7 +375,11 @@ export async function POST(request: NextRequest) {
                   isAudio,
                   chunkIndex: i,
                   chunkTotal: total,
-                  glossary: glossary || undefined,
+                  glossary: resolveGlossaryForContent(
+                    allGlossaryTerms,
+                    chunk,
+                    perRequestGlossary
+                  ),
                   returnHeaders: true,
                 }
               );
@@ -406,7 +425,7 @@ export async function POST(request: NextRequest) {
             );
             mergeStartMs = Date.now();
             summary = await mergeSummaries(chunkSummaries, apiKey, {
-              glossary: glossary || undefined,
+              glossaryContext,
               onProgress: (cur, tot) => {
                 send({
                   type: "progress",

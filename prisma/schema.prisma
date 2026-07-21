@@ -49,6 +49,7 @@ model SummaryJob {
   mergeDurationMs           Int?                 @map("merge_duration_ms")
   completedAt               DateTime?            @map("completed_at")
   personalGroqApiKey        String?              @map("personal_groq_api_key")
+  isApiJob                  Boolean              @default(false)
   editHistory               SummaryEditHistory[]
   user                      User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -108,4 +109,17 @@ model AuditLog {
   @@index([type])
   @@index([createdAt])
   @@index([userId])
+}
+
+model GlossaryTerm {
+  id             String   @id @default(cuid())
+  /// Correct spelling (e.g. "Pak Sekjen").
+  term           String   @unique
+  /// Comma-separated known transcription mishearings (e.g. "PASECGEN, Pak Sekjend").
+  commonMistakes String   @default("") @map("common_mistakes")
+  /// Optional meaning/context to help the model recognize the term.
+  definition     String?
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  @@map("glossary_terms")
 }

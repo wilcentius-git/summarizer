@@ -4,6 +4,8 @@
  */
 
 import type { PdfPageImage } from "@/lib/pdf-to-images";
+import type { GlossaryContext } from "@/lib/glossary";
+import { resolveGlossaryFromContext } from "@/lib/glossary";
 import { logger } from "@/lib/logger";
 import {
   SUMMARIZE_PIPELINE_STANDARD,
@@ -230,7 +232,7 @@ ATURAN UMUM:
 - DEDUPLIKASI: Poin yang sama atau mirip hanya perlu disebut SATU KALI. Hindari pengulangan ide.
 - CROSS-SECTION DEDUP: Ringkasan Eksekutif, Rangkuman, dan Insight tambahan TIDAK BOLEH mengandung kalimat atau ide yang sama. Setiap bagian punya peran berbeda.
 - Hindari kata "juga" di awal atau akhir kalimat. Variasikan struktur kalimat.
-- KOREKSI TRANSKRIPSI: Perbaiki kesalahan umum dari speech-to-text, mis. "ekspetasi" → "ekspektasi", "menafigasi" → "menavigasi", "infestasi" → "investasi", "ekosistem" yang seharusnya "eksistem", nama orang/tempat yang salah eja.
+- KOREKSI TRANSKRIPSI: Perbaiki kesalahan umum dari speech-to-text, mis. "ekspetasi" → "ekspektasi", "menafigasi" → "menavigasi", "infestasi" → "investasi", "ekosistem" yang seharusnya "eksistem", nama orang/tempat yang salah eja. Jika daftar koreksi tersimpan disertakan di bawah, terapkan ejaan benar untuk istilah yang tercantum; tetap perbaiki kesalahan lain yang Anda kenali.
 - Gunakan konten dari SEMUA halaman dokumen. Jangan hanya merangkum halaman terakhir.
 - Tanpa pembukaan lain, langsung rangkuman saja.
 - Pastikan rangkuman selesai lengkap; jangan potong di tengah kalimat.`;
@@ -254,8 +256,10 @@ ATURAN:
 - BUANG basa-basi, ucapan terima kasih, filler, dan small talk — jangan dijadikan poin
 - Jika bagian ini tidak memuat konten substantif, kembalikan teks kosong (nol poin). JANGAN membuat poin hanya agar ada output.
 - SPESIFISITAS: setiap poin harus memuat detail konkret dari transkrip
-- KOREKSI TRANSKRIPSI: perbaiki kesalahan speech-to-text
-  mis. "ekspetasi"→"ekspektasi", "infestasi"→"investasi"
+- KOREKSI TRANSKRIPSI: perbaiki kesalahan speech-to-text (mis. "ekspetasi"→"ekspektasi", "infestasi"→"investasi"). Dua lapis:
+  (1) UTAMA — gunakan penilaian Anda sendiri: jika kata/frasa di transkrip secara fonetik menyerupai istilah glosarium yang tercantum di bawah (ejaan benar), koreksi ke ejaan benar tersebut meskipun tidak ada contoh kesalahan eksplisit. Ini berlaku untuk SETIAP istilah glosarium, dengan atau tanpa daftar kesalahan umum.
+  (2) TAMBAHAN — jika istilah glosarium memuat contoh kesalahan transkripsi, anggap itu sebagai konfirmasi: koreksi pola-pola persis tersebut dengan tegas; contoh kesalahan menaikkan keyakinan, bukan menggantikan penilaian fonetik umum di (1).
+  Tetap perbaiki kesalahan speech-to-text umum lain yang Anda kenali.
 - Hindari kata "juga" di awal atau akhir kalimat
 - Tanpa pembukaan, langsung poin saja (atau kosong jika tidak ada poin)
 - Pastikan kalimat terakhir selesai lengkap`;
@@ -293,7 +297,7 @@ ATURAN:
 - CROSS-SECTION DEDUP: Ringkasan Eksekutif, Rangkuman, Insight tambahan tidak boleh mengandung ide yang sama.
 - SPESIFISITAS: Buang poin generik yang berlaku untuk konteks apa saja.
 - Hindari kata "juga" di awal/akhir kalimat. Variasikan frasa penghubung.
-- KOREKSI TRANSKRIPSI: perbaiki kesalahan speech-to-text (mis. "ekspetasi"→"ekspektasi").
+- KOREKSI TRANSKRIPSI: perbaiki kesalahan speech-to-text (mis. "ekspetasi"→"ekspektasi"). Jika daftar koreksi tersimpan disertakan di bawah, terapkan ejaan benar untuk istilah yang tercantum; tetap perbaiki kesalahan lain yang Anda kenali.
 - Pastikan rangkuman selesai LENGKAP, tidak terpotong di tengah kalimat.
 - Langsung rangkuman saja, tanpa pembukaan. Output akhir: tepat satu blok tiap section, tidak ada pengulangan struktur.
 - Setiap heading section di baris TERPISAH, diikuti baris kosong, lalu isinya.`;
@@ -365,7 +369,7 @@ export function isGroqRateLimitError(err: unknown): err is GroqRateLimitError {
 async function mergeSummariesOnce(
   summaries: string[],
   apiKey: string,
-  glossary: string | undefined,
+  glossaryContext: GlossaryContext | undefined,
   onProgress: MergeProgress | undefined,
   onBatchComplete?: (batchResults: string[]) => Promise<void>,
   depth: number = 0
@@ -388,7 +392,7 @@ async function mergeSummariesOnce(
       const result = await summarizeWithGroq(parts.join("\n\n"), apiKey, {
         systemPrompt: SUMMARIZE_MERGE_PROMPT,
         maxTokens: 4000,
-        glossary,
+        glossary: resolveGlossaryFromContext(glossaryContext, parts.join("\n\n")),
         pipeline: SUMMARIZE_PIPELINE_STANDARD,
       });
       return result;
@@ -413,7 +417,7 @@ async function mergeSummariesOnce(
       const result = await summarizeWithGroq(combined, apiKey, {
         systemPrompt: SUMMARIZE_MERGE_PROMPT,
         maxTokens: 3000,
-        glossary,
+        glossary: resolveGlossaryFromContext(glossaryContext, combined),
         pipeline,
       });
       return result;
@@ -450,7 +454,7 @@ async function mergeSummariesOnce(
       const result = await summarizeWithGroq(batchInput, apiKey, {
         systemPrompt: MERGE_INTERMEDIATE_PROMPT,
         maxTokens: 1500,
-        glossary,
+        glossary: resolveGlossaryFromContext(glossaryContext, batchInput),
         pipeline,
       });
 
@@ -471,11 +475,13 @@ async function mergeSummariesOnce(
     await sleep(62000);
     // Inner reduce rounds: no onBatchComplete — checkpoints only for outermost merge
     logger.log(`>>> [MERGE depth=${depth}] All batches done, recursing to depth=${depth + 1} with ${batchResults.length} results`);
-    return mergeSummariesOnce(batchResults, apiKey, glossary, onProgress, onBatchComplete, depth + 1);
+    return mergeSummariesOnce(batchResults, apiKey, glossaryContext, onProgress, onBatchComplete, depth + 1);
 }
 
 export interface MergeSummariesOptions {
+  /** Pre-resolved per-call glossary string (legacy). Prefer glossaryContext. */
   glossary?: string;
+  glossaryContext?: GlossaryContext;
   onProgress?: MergeProgress;
   onBatchComplete?: (batchResults: string[]) => Promise<void>;
 }
@@ -491,13 +497,13 @@ export async function mergeSummaries(
       ? (optionsOrProgress as MergeSummariesOptions)
       : undefined;
 
-  let glossary: string | undefined;
+  let glossaryContext: GlossaryContext | undefined;
   let onProgress: MergeProgress | undefined;
 
   if (typeof optionsOrProgress === "function") {
     onProgress = optionsOrProgress;
   } else if (options) {
-    glossary = options.glossary;
+    glossaryContext = options.glossaryContext;
     onProgress = options.onProgress;
   }
   if (legacyOnProgress) onProgress = legacyOnProgress;
@@ -505,7 +511,7 @@ export async function mergeSummaries(
   return mergeSummariesOnce(
     summaries,
     apiKey,
-    glossary,
+    glossaryContext,
     onProgress,
     options?.onBatchComplete
   );
@@ -695,9 +701,7 @@ export async function summarizeWithGroq(
           : SUMMARIZE_CHUNK_DOC_PROMPT
         : SUMMARIZE_PROMPT;
 
-  const glossaryNote = options?.glossary
-    ? `\n\nISTILAH TEKNIS KHUSUS (pertahankan ejaan persis seperti ini, jangan ubah atau terjemahkan): ${options.glossary}`
-    : "";
+  const glossaryNote = options?.glossary ? `\n\n${options.glossary}` : "";
 
   const fullSystemPrompt = basePrompt + glossaryNote;
 

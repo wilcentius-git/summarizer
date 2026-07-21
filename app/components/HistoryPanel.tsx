@@ -258,6 +258,13 @@ export function HistoryPanel({
     filenameSuffix: string;
   } | null>(null);
   const sectionRef = useRef<HTMLElement | null>(null);
+  const historyListRef = useRef<HTMLUListElement>(null);
+
+  useEffect(() => {
+    if (historyExpanded && historyListRef.current) {
+      historyListRef.current.scrollTop = 0;
+    }
+  }, [historyExpanded]);
 
   useEffect(() => {
     if (focusHistorySignal <= 0) return;
@@ -434,7 +441,7 @@ export function HistoryPanel({
           {historyJobs.length === 0 ? (
             <p className="text-sm text-gray-500 py-4">Belum ada riwayat. Unggah dan rangkum file untuk melihat riwayat di sini.</p>
           ) : (
-            <ul className="space-y-2 max-h-[400px] overflow-y-auto overflow-x-visible">
+            <ul ref={historyListRef} className="space-y-2 max-h-[400px] overflow-y-auto overflow-x-visible">
               {historyJobs.filter((job) => job.id !== resumeLoading).map((job) => (
                 <li
                   key={job.id}

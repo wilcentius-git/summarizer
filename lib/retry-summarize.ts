@@ -19,6 +19,11 @@ import {
   SUMMARIZE_PIPELINE_STANDARD,
 } from "@/lib/groq";
 import { truncateSummarySections } from "@/lib/summary-format";
+import {
+  loadAllGlossaryTerms,
+  resolveGlossaryForContent,
+  type GlossaryContext,
+} from "@/lib/glossary";
 
 export async function processRateLimitedJob(
   job: SummaryJob,
@@ -40,6 +45,9 @@ export async function processRateLimitedJob(
   }
 
   try {
+    const allGlossaryTerms = await loadAllGlossaryTerms();
+    const glossaryContext: GlossaryContext = { allTerms: allGlossaryTerms };
+
     let summary: string;
     if (!isAudio && text.length <= SUMMARIZE_PIPELINE_STANDARD.summarizeChunkSize) {
       await prisma.summaryJob.update({
@@ -49,7 +57,9 @@ export async function processRateLimitedJob(
       if (await isJobCancelled(job.id)) {
         return { success: false, error: "Job was cancelled." };
       }
-      summary = await summarizeWithGroq(text, apiKey);
+      summary = await summarizeWithGroq(text, apiKey, {
+        glossary: resolveGlossaryForContent(allGlossaryTerms, text),
+      });
     } else {
       let initialSummaries: string[] = [];
       if (job.partialSummary) {
@@ -83,6 +93,7 @@ export async function processRateLimitedJob(
             isAudio,
             chunkIndex: i,
             chunkTotal: chunks.length,
+            glossary: resolveGlossaryForContent(allGlossaryTerms, chunks[i]),
             returnHeaders: true,
           }
         );
@@ -105,7 +116,7 @@ export async function processRateLimitedJob(
       if (await isJobCancelled(job.id)) {
         return { success: false, error: "Job was cancelled." };
       }
-      summary = await mergeSummaries(chunkSummaries, apiKey);
+      summary = await mergeSummaries(chunkSummaries, apiKey, { glossaryContext });
     }
     summary = deduplicateParagraphs(summary || "Rangkuman tidak dapat dibuat.");
     summary = truncateSummarySections(summary, 40);

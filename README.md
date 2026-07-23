@@ -118,6 +118,13 @@ loop every 5s:
 - **Admin user required**, API-key requests attribute jobs to the seeded `admin` user. Run `npx prisma db seed` (with `SEED_ADMIN_PASSWORD` set) before calling the API, or job creation will fail on the foreign key.
 - **Independent auth**, Bearer API keys and `auth-token` cookies are separate. Middleware only checks that a Bearer header is present; the route validates the key. Either auth method can call `/api/summarize` without the other.
 
+### Known Limitations
+
+- **No cancel or delete via API** — `DELETE /api/summary-jobs/<jobId>` and `POST /api/summary-jobs/<jobId>/cancel` only accept cookie-based auth. API key callers cannot cancel a running job.
+- **No manual resume via API** — `POST /api/summary-jobs/<jobId>/resume` only accepts cookie-based auth. However, jobs stuck in `waiting_rate_limit` are automatically retried by the background worker after 1 hour — no action needed from the caller.
+- **Jobs stuck in `processing`** — if the server crashes mid-job, the job status can remain `processing` indefinitely. For API jobs, the 6-hour auto-cleanup will eventually delete it. If a job stays in `processing` for longer than 30 minutes, assume something went wrong and resubmit the file.
+- **Failed jobs require resubmission** — if a job returns `status: "failed"`, resubmit the file as a new job. There is no way to resume a failed job via the API.
+
 ## Setup
 
 1. Install dependencies:

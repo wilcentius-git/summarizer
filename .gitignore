@@ -19,6 +19,8 @@
 
 # documentation (local screenshots)
 documentation/screenshots/
+documentation/PANDUAN API KEMENKUM SUMMARIZER.docx
+documentation/PANDUAN PENGGUNAAN KEMENKUM SUMMARIZER.docx
 
 # debug
 npm-debug.log*
